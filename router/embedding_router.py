@@ -7,32 +7,21 @@ model = SentenceTransformer(
     "intfloat/multilingual-e5-small"
 )
 
-agent_vectors = {}
+THRESHOLD = 0.3
 
-for agent in AGENTS.values():
-    vec = model.encode(agent.description)
-    agent_vectors[agent.id] = vec
+agent_vectors = {
+    a.id: model.encode(f"passage: {a.description}", normalize_embeddings=True)
+    for a in AGENTS.values() if a.enabled and a.url
+}
 
 
 def route(message: str) -> tuple[str | None, float]:
-
-    query_vec = model.encode(message)
-
-    best_agent = None
-    best_score = 0.0
+    q = model.encode(f"query: {message}", normalize_embeddings=True)
+    best_agent, best_score = None, 0.0
 
     for agent_id, vec in agent_vectors.items():
-
-        score = cosine_similarity(
-            [query_vec],
-            [vec]
-        )[0][0]
-
+        score = float(q @ vec)
         if score > best_score:
-            best_score = score
-            best_agent = agent_id
-
-    if best_score < 0.60:
-        return None, best_score
-
-    return best_agent, best_score
+            best_score, best_agent = score, agent_id
+            
+    return (best_agent, best_score) if best_score >= THRESHOLD else (None, best_score)

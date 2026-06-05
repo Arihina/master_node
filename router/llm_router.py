@@ -14,39 +14,27 @@ def route(message: str) -> str:
     )
 
     prompt = f"""
-Ты роутер запросов.
+    Ты роутер запросов.
 
-Доступные агенты:
+    Доступные агенты:
 
-{agents_text}
+    {agents_text}
 
-Верни только JSON без пояснений и markdown:
+    Верни только JSON без пояснений и markdown:
 
-{{"agent":"agent_id"}}
+    {{"agent":"agent_id"}}
 
-Запрос:
+    Запрос:
 
-{message}
-"""
+    {message}
+    """
 
     response = client.chat(
         model="gemma2:2b",
-        messages=[
-            {
-                "role": "user",
-                "content": prompt,
-            }
-        ],
-        options={
-            "temperature": 0,
-        },
+        messages=[{"role": "user", "content": prompt}],
+        format="json",
+        options={"temperature": 0},
     )
+    agent = json.loads(response["message"]["content"]).get("agent")
 
-    content = response["message"]["content"].strip()
-
-    try:
-        return json.loads(content)["agent"]
-    except json.JSONDecodeError as e:
-        raise ValueError(
-            f"Модель вернула невалидный JSON:\n{content}"
-        ) from e
+    return agent if agent in AGENTS else None
