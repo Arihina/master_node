@@ -1,8 +1,9 @@
 import asyncio
+
+from router import rule_router, embedding_router, llm_router
 from registry import AGENTS
-from router import rule_router
-from router import embedding_router
-from router import llm_router
+
+FALLBACK_AGENT = "chat"
 
 
 class MasterRouter:
@@ -16,6 +17,7 @@ class MasterRouter:
 
         try:
             agent = await asyncio.to_thread(llm_router.route, message)
-        except ValueError:
+        except (ValueError, Exception):
             agent = None
-        return agent if agent in AGENTS else "chat"
+
+        return agent if agent in AGENTS and AGENTS[agent].enabled else FALLBACK_AGENT
