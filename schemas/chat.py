@@ -5,16 +5,21 @@ class RouteRequest(BaseModel):
     message: str
 
 
-class RouteResponse(BaseModel):
-    agent: str
-
-
 class CreateSessionRequest(BaseModel):
     title: str | None = None
 
 
+class RenameSessionRequest(BaseModel):
+    title: str
+
+
 class ChatRequest(BaseModel):
     message: str
+
+
+class FeedbackRequest(BaseModel):
+    vote: int | None = None
+    comment: str | None = None
 
 
 class SmartChatRequest(BaseModel):
