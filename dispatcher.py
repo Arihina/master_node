@@ -1,5 +1,18 @@
 import httpx
+import json
+
 from registry import AGENTS
+
+
+class AgentUnavailable(Exception):
+    def __init__(self, agent_id, detail):
+        self.agent_id = agent_id
+        self.detail = detail
+        super().__init__(detail)
+
+
+def _sse_error(msg: str) -> bytes:
+    return f"data: {json.dumps({'error': msg}, ensure_ascii=False)}\n\n".encode()
 
 
 class AgentDispatcher:
@@ -31,27 +44,30 @@ class AgentDispatcher:
             kwargs["json"] = json_body
         return await self.client.request(method, f"{base}{path}", **kwargs)
 
-    async def stream_chat(
-        self,
-        agent_id: str,
-        session_id: int,
-        user_id: str,
-        message: str,
-    ):
+    async def stream_chat(self, agent_id, session_id, user_id, message):
         base = self._base(agent_id)
-        async with self.client.stream(
-            "POST",
-            f"{base}/sessions/{session_id}/chat",
-            headers={"X-User-Id": user_id},
-            json={"message": message},
-        ) as response:
+        try:
+            stream_cm = self.client.stream(
+                "POST",
+                f"{base}/sessions/{session_id}/chat",
+                headers={"X-User-Id": user_id},
+                json={"message": message},
+            )
+            response = await stream_cm.__aenter__()
+        except httpx.ConnectError as e:
+            raise AgentUnavailable(agent_id, f"агент недоступен: {e}")
+
+        try:
             if response.status_code >= 400:
                 body = await response.aread()
-                raise httpx.HTTPStatusError(
-                    f"Агент {agent_id} вернул {response.status_code}: "
-                    f"{body.decode(errors='replace')}",
-                    request=response.request,
-                    response=response,
+                raise AgentUnavailable(
+                    agent_id,
+                    f"{response.status_code}: {body.decode(errors='replace')}",
                 )
-            async for chunk in response.aiter_raw():
-                yield chunk
+            try:
+                async for chunk in response.aiter_raw():
+                    yield chunk
+            except httpx.HTTPError as e:
+                yield _sse_error(f"соединение с агентом прервано: {e}")
+        finally:
+            await stream_cm.__aexit__(None, None, None)
