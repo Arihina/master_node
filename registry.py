@@ -9,6 +9,7 @@ class AgentInfo:
     description: str
     enabled: bool = True
 
+# extend descriptions and add examples for query 
 
 AGENTS: dict[str, AgentInfo] = {
     "epoz": AgentInfo(

@@ -7,7 +7,7 @@ import httpx
 
 from registry import AGENTS
 from router.router_service import MasterRouter
-from dispatcher import AgentDispatcher
+from dispatcher import AgentDispatcher, AgentUnavailable
 from schemas.chat import (
     RouteRequest,
     CreateSessionRequest,
@@ -28,6 +28,22 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(lifespan=lifespan)
+
+
+async def _streaming_or_error(gen):
+    try:
+        first = await gen.__anext__()
+    except StopAsyncIteration:
+        return StreamingResponse(iter(()), media_type="text/event-stream")
+    except AgentUnavailable as e:
+        raise HTTPException(502, f"Агент {e.agent_id}: {e.detail}")
+
+    async def body():
+        yield first
+        async for chunk in gen:
+            yield chunk
+
+    return StreamingResponse(body(), media_type="text/event-stream")
 
 
 def _check_agent(agent_id: str):
@@ -124,11 +140,9 @@ async def chat(
     x_user_id: str = Header(...),
 ):
     _check_agent(agent_id)
-    return StreamingResponse(
-        dispatcher.stream_chat(agent_id, session_id,
-                               x_user_id, payload.message),
-        media_type="text/event-stream",
-    )
+    gen = dispatcher.stream_chat(
+        agent_id, session_id, x_user_id, payload.message)
+    return await _streaming_or_error(gen)
 
 
 @app.post("/agents/{agent_id}/messages/{message_id}/feedback")
@@ -175,18 +189,36 @@ async def smart_chat(payload: SmartChatRequest, x_user_id: str = Header(...)):
 
     session_id = payload.session_id
     if session_id is None:
-        resp = await dispatcher.forward(agent_id, "POST", "/sessions", x_user_id, {})
+        try:
+            resp = await dispatcher.forward(agent_id, "POST", "/sessions", x_user_id, {})
+        except httpx.ConnectError as e:
+            raise HTTPException(502, f"Агент {agent_id} недоступен: {e}")
         if resp.status_code >= 400:
             raise HTTPException(
                 resp.status_code, "Не удалось создать сессию у агента")
         session_id = resp.json()["id"]
 
-    return StreamingResponse(
-        dispatcher.stream_chat(agent_id, session_id,
-                               x_user_id, payload.message),
-        media_type="text/event-stream",
-        headers={"X-Agent-Id": agent_id, "X-Session-Id": str(session_id)},
-    )
+    gen = dispatcher.stream_chat(
+        agent_id, session_id, x_user_id, payload.message)
+    
+    resp = await _streaming_or_error(gen)
+    resp.headers["X-Agent-Id"] = agent_id
+    resp.headers["X-Session-Id"] = str(session_id)
+    
+    return resp
+
+# One route that forwards any path
+# @app.api_route("/agents/{agent_id}/{path:path}",
+#                methods=["GET", "POST", "PATCH", "DELETE"])
+# async def proxy(agent_id: str, path: str, request: Request,
+#                 x_user_id: str = Header(...)):
+#     _check_agent(agent_id)
+#     body = await request.body()
+#     resp = await dispatcher.forward_raw(
+#         agent_id, request.method, f"/{path}",
+#         x_user_id, body, dict(request.query_params),
+#     )
+#     return _relay(resp)
 
 
 if __name__ == "__main__":
