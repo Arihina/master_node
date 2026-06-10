@@ -7,10 +7,19 @@ from registry import AGENTS
 client = Client(host="http://localhost:11434")
 
 
-def route(message: str) -> str:
+def route(
+    message: str,
+    candidates: list[str] | None = None
+) -> str:
+
+    if candidates:
+        available_agents = [AGENTS[agent_id] for agent_id in candidates]
+    else:
+        available_agents = AGENTS.values()
+
     agents_text = "\n".join(
         f"- {agent.id}: {agent.description}"
-        for agent in AGENTS.values()
+        for agent in available_agents
     )
 
     prompt = f"""
