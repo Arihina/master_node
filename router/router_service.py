@@ -1,6 +1,6 @@
 import asyncio
 
-from router import rule_router, embedding_router, llm_router
+from router import embedding_router, llm_router
 from registry import AGENTS
 
 FALLBACK_AGENT = "chat"
@@ -8,16 +8,17 @@ FALLBACK_AGENT = "chat"
 
 class MasterRouter:
     async def route(self, message: str) -> str:
-        if agent := rule_router.route(message):
-            return agent
+        result = await asyncio.to_thread(embedding_router.route, message)
 
-        agent, _ = await asyncio.to_thread(embedding_router.route, message)
-        if agent:
-            return agent
+        if result["decision"] == "direct":
+            return result["agent"]
 
         try:
-            agent = await asyncio.to_thread(llm_router.route, message)
-        except (ValueError, Exception):
+            if result["decision"] == "ambiguous":
+                agent = await asyncio.to_thread(llm_router.route, message, result["candidates"])
+            else:
+                agent = await asyncio.to_thread(llm_router.route, message)
+        except Exception:
             agent = None
 
-        return agent if agent in AGENTS and AGENTS[agent].enabled else FALLBACK_AGENT
+        return agent if agent in AGENTS else FALLBACK_AGENT
