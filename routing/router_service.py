@@ -1,6 +1,6 @@
 import asyncio
 
-from router import embedding_router, llm_router
+from routing import embedding_router, llm_router
 from registry import AGENTS
 
 FALLBACK_AGENT = "chat"
