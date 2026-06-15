@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 
 @dataclass
@@ -7,6 +7,8 @@ class AgentInfo:
     name: str
     url: str
     description: str
+    transport: str = "contract"
+    config: dict = field(default_factory=dict)
     enabled: bool = True
 
 # extend descriptions and add more examples for query
