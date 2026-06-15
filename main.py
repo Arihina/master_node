@@ -1,224 +1,33 @@
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Header, HTTPException, Response
-from fastapi.responses import StreamingResponse
+from fastapi import FastAPI
 
-import httpx
+from fastapi.middleware.cors import CORSMiddleware
 
-from registry import AGENTS
-from router.router_service import MasterRouter
-from dispatcher import AgentDispatcher, AgentUnavailable
-from schemas.chat import (
-    RouteRequest,
-    CreateSessionRequest,
-    RenameSessionRequest,
-    ChatRequest,
-    FeedbackRequest,
-    SmartChatRequest,
-)
-
-router = MasterRouter()
-dispatcher = AgentDispatcher()
+from config import settings
+from adapters import close_all
+from api import meta, proxy, chat
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     yield
-    await dispatcher.aclose()
+    await close_all()
 
 
 app = FastAPI(lifespan=lifespan)
 
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=False,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
-async def _streaming_or_error(gen):
-    try:
-        first = await gen.__anext__()
-    except StopAsyncIteration:
-        return StreamingResponse(iter(()), media_type="text/event-stream")
-    except AgentUnavailable as e:
-        raise HTTPException(502, f"Агент {e.agent_id}: {e.detail}")
-
-    async def body():
-        yield first
-        async for chunk in gen:
-            yield chunk
-
-    return StreamingResponse(body(), media_type="text/event-stream")
-
-
-def _check_agent(agent_id: str):
-    agent = AGENTS.get(agent_id)
-    if agent is None or not agent.enabled:
-        raise HTTPException(404, f"Агент {agent_id} не найден или выключен")
-    if not agent.url:
-        raise HTTPException(503, f"У агента {agent_id} не задан url")
-
-
-def _relay(resp: httpx.Response) -> Response:
-    return Response(
-        content=resp.content,
-        status_code=resp.status_code,
-        media_type=resp.headers.get("content-type"),
-    )
-
-
-@app.get("/agents")
-async def agents():
-    return [
-        {"id": a.id, "name": a.name}
-        for a in AGENTS.values()
-        if a.enabled
-    ]
-
-
-@app.post("/route")
-async def route_message(payload: RouteRequest):
-    return {"agent": await router.route(payload.message)}
-
-
-@app.post("/agents/{agent_id}/sessions")
-async def create_session(
-    agent_id: str,
-    payload: CreateSessionRequest,
-    x_user_id: str = Header(...),
-):
-    _check_agent(agent_id)
-    resp = await dispatcher.forward(
-        agent_id, "POST", "/sessions", x_user_id, payload.model_dump()
-    )
-    return _relay(resp)
-
-
-@app.get("/agents/{agent_id}/sessions")
-async def list_sessions(agent_id: str, x_user_id: str = Header(...)):
-    _check_agent(agent_id)
-    resp = await dispatcher.forward(agent_id, "GET", "/sessions", x_user_id)
-    return _relay(resp)
-
-
-@app.get("/agents/{agent_id}/sessions/{session_id}/messages")
-async def session_messages(
-    agent_id: str, session_id: int, x_user_id: str = Header(...)
-):
-    _check_agent(agent_id)
-    resp = await dispatcher.forward(
-        agent_id, "GET", f"/sessions/{session_id}/messages", x_user_id
-    )
-    return _relay(resp)
-
-
-@app.patch("/agents/{agent_id}/sessions/{session_id}")
-async def rename_session(
-    agent_id: str,
-    session_id: int,
-    payload: RenameSessionRequest,
-    x_user_id: str = Header(...),
-):
-    _check_agent(agent_id)
-    resp = await dispatcher.forward(
-        agent_id, "PATCH", f"/sessions/{session_id}", x_user_id, payload.model_dump()
-    )
-    return _relay(resp)
-
-
-@app.delete("/agents/{agent_id}/sessions/{session_id}")
-async def delete_session(
-    agent_id: str, session_id: int, x_user_id: str = Header(...)
-):
-    _check_agent(agent_id)
-    resp = await dispatcher.forward(
-        agent_id, "DELETE", f"/sessions/{session_id}", x_user_id
-    )
-    return _relay(resp)
-
-
-@app.post("/agents/{agent_id}/sessions/{session_id}/chat")
-async def chat(
-    agent_id: str,
-    session_id: int,
-    payload: ChatRequest,
-    x_user_id: str = Header(...),
-):
-    _check_agent(agent_id)
-    gen = dispatcher.stream_chat(
-        agent_id, session_id, x_user_id, payload.message)
-    return await _streaming_or_error(gen)
-
-
-@app.post("/agents/{agent_id}/messages/{message_id}/feedback")
-async def set_feedback(
-    agent_id: str,
-    message_id: int,
-    payload: FeedbackRequest,
-    x_user_id: str = Header(...),
-):
-    _check_agent(agent_id)
-    resp = await dispatcher.forward(
-        agent_id, "POST", f"/messages/{message_id}/feedback",
-        x_user_id, payload.model_dump(),
-    )
-    return _relay(resp)
-
-
-@app.get("/agents/{agent_id}/messages/{message_id}/feedback")
-async def get_feedback(
-    agent_id: str, message_id: int, x_user_id: str = Header(...)
-):
-    _check_agent(agent_id)
-    resp = await dispatcher.forward(
-        agent_id, "GET", f"/messages/{message_id}/feedback", x_user_id
-    )
-    return _relay(resp)
-
-
-@app.delete("/agents/{agent_id}/messages/{message_id}/feedback")
-async def delete_feedback(
-    agent_id: str, message_id: int, x_user_id: str = Header(...)
-):
-    _check_agent(agent_id)
-    resp = await dispatcher.forward(
-        agent_id, "DELETE", f"/messages/{message_id}/feedback", x_user_id
-    )
-    return _relay(resp)
-
-
-@app.post("/chat")
-async def smart_chat(payload: SmartChatRequest, x_user_id: str = Header(...)):
-    agent_id = payload.agent_id or await router.route(payload.message)
-    _check_agent(agent_id)
-
-    session_id = payload.session_id
-    if session_id is None:
-        try:
-            resp = await dispatcher.forward(agent_id, "POST", "/sessions", x_user_id, {})
-        except httpx.ConnectError as e:
-            raise HTTPException(502, f"Агент {agent_id} недоступен: {e}")
-        if resp.status_code >= 400:
-            raise HTTPException(
-                resp.status_code, "Не удалось создать сессию у агента")
-        session_id = resp.json()["id"]
-
-    gen = dispatcher.stream_chat(
-        agent_id, session_id, x_user_id, payload.message)
-    
-    resp = await _streaming_or_error(gen)
-    resp.headers["X-Agent-Id"] = agent_id
-    resp.headers["X-Session-Id"] = str(session_id)
-    
-    return resp
-
-# One route that forwards any path
-# @app.api_route("/agents/{agent_id}/{path:path}",
-#                methods=["GET", "POST", "PATCH", "DELETE"])
-# async def proxy(agent_id: str, path: str, request: Request,
-#                 x_user_id: str = Header(...)):
-#     _check_agent(agent_id)
-#     body = await request.body()
-#     resp = await dispatcher.forward_raw(
-#         agent_id, request.method, f"/{path}",
-#         x_user_id, body, dict(request.query_params),
-#     )
-#     return _relay(resp)
+app.include_router(meta.router)
+app.include_router(proxy.router)
+app.include_router(chat.router)
 
 
 if __name__ == "__main__":
@@ -226,8 +35,8 @@ if __name__ == "__main__":
 
     uvicorn.run(
         "main:app",
-        host="127.0.0.1",
-        port=8000,
+        host=settings.host,
+        port=settings.port,
         reload=True,
-        timeout_keep_alive=300,
+        timeout_keep_alive=settings.timeout_keep_alive,
     )
