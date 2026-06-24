@@ -191,7 +191,7 @@ AGENTS: dict[str, AgentInfo] = {
     "epoz": AgentInfo(
         id="epoz",
         name="ЕПоЗ",
-        url="https://127.0.0.1:8443",
+        url="http://127.0.0.1:8001",
         description="Закупки, ЕПоЗ",
     ),
     # ...
