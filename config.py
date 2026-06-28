@@ -19,5 +19,8 @@ class Settings(BaseSettings):
 
     fallback_agent: str = "chat"
 
+    ollama_model: str
+    embedd_model: str
+
 
 settings = Settings()

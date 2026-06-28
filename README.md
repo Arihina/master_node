@@ -240,6 +240,30 @@ AGENT_MAX_KEEPALIVE=40
 
 # --- роутинг ---
 FALLBACK_AGENT=chat
+
+# --- models ---
+OLLAMA_MODEL=gemma2:2b
+EMBEDD_MODEL=intfloat/multilingual-e5-small
+```
+или
+```
+# --- сеть мастера ---
+HOST=127.0.0.1
+PORT=8000
+TIMEOUT_KEEP_ALIVE=300
+
+# --- исходящие к contract-агентам ---
+AGENT_TIMEOUT=300
+AGENT_VERIFY_TLS=false
+AGENT_MAX_CONNECTIONS=200
+AGENT_MAX_KEEPALIVE=40
+
+# --- роутинг ---
+FALLBACK_AGENT=chat
+
+# --- models ---
+OLLAMA_MODEL=qwen3.6:35b
+EMBEDD_MODEL=BAAI/bge-m3
 ```
 ```bash
 # запуск

@@ -2,8 +2,10 @@ from sentence_transformers import SentenceTransformer
 
 from registry import AGENTS
 
+from config import settings
+
 model = SentenceTransformer(
-    "intfloat/multilingual-e5-small"
+    settings.embedd_model
 )
 
 THRESHOLD = 0.69

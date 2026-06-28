@@ -4,6 +4,8 @@ from ollama import Client
 
 from registry import AGENTS
 
+from config import settings
+
 client = Client(host="http://localhost:11434")
 
 
@@ -39,7 +41,7 @@ def route(
     """
 
     response = client.chat(
-        model="gemma2:2b",
+        model=settings.ollama_model,
         messages=[{"role": "user", "content": prompt}],
         format="json",
         options={"temperature": 0},
