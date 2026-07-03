@@ -1,10 +1,10 @@
 import json
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 
 from auth import get_user_id
 from adapters import get_adapter, AgentUnavailable
-from api.deps import check_agent, streaming_or_error, master_router
+from api.deps import check_agent, require_capability, streaming_or_error, master_router
 from schemas.chat import ChatRequest, SmartChatRequest
 
 router = APIRouter(tags=["chat"])
@@ -18,7 +18,7 @@ async def chat(
     check_agent(agent_id)
     gen = get_adapter(agent_id).stream_chat(
         user_id, session_id, payload.message)
-    
+
     return await streaming_or_error(gen)
 
 
@@ -48,9 +48,19 @@ async def smart_chat(
         session_id = json.loads(ar.content)["id"]
 
     gen = adapter.stream_chat(user_id, session_id, payload.message)
-    
+
     resp = await streaming_or_error(gen)
     resp.headers["X-Agent-Id"] = agent_id
     resp.headers["X-Session-Id"] = str(session_id)
 
     return resp
+
+
+@router.post("/agents/{agent_id}/ocr")
+async def ocr(agent_id: str, file: UploadFile = File(...),
+              user_id: str = Depends(get_user_id)):
+    check_agent(agent_id)
+    require_capability(agent_id, "ocr")
+    content = await file.read()
+    gen = get_adapter(agent_id).run_ocr(user_id, file.filename, content)
+    return await streaming_or_error(gen)
