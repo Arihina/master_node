@@ -37,3 +37,10 @@ async def streaming_or_error(gen) -> StreamingResponse:
             yield chunk
 
     return StreamingResponse(body(), media_type="text/event-stream")
+
+
+def require_capability(agent_id: str, capability: str) -> None:
+    agent = AGENTS[agent_id]
+    if capability not in agent.capabilities:
+        raise HTTPException(
+            404, f"Агент {agent_id} не поддерживает '{capability}'")
