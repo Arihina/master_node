@@ -17,6 +17,16 @@ class AgentResponse:
     media_type: str = "application/json"
 
 
+class CapabilityNotSupported(Exception):
+    """Агент не поддерживает запрошенную возможность (не входит в его capabilities)."""
+
+    def __init__(self, agent_id: str, capability: str):
+        self.agent_id = agent_id
+        self.capability = capability
+        super().__init__(
+            f"{agent_id} не поддерживает возможность '{capability}'")
+
+
 class AgentUnavailable(Exception):
     """Агент недоступен или ответил ошибкой ДО начала стрима."""
 
@@ -76,7 +86,8 @@ class AgentAdapter(ABC):
         self, user_id: str, message_id: str) -> AgentResponse: ...
 
     @abstractmethod
-    def stream_chat(self, user_id: str, session_id: str, message: str) -> AsyncIterator[bytes]:
+    def stream_chat(self, user_id: str, session_id: str, message: str,
+                    attachment: tuple[str, bytes] | None = None,) -> AsyncIterator[bytes]:
         """Async-генератор SSE-байтов.
 
         До первого чанка может бросить AgentUnavailable (мастер превратит в 502).
@@ -86,3 +97,11 @@ class AgentAdapter(ABC):
 
     async def aclose(self) -> None:
         """Освободить ресурсы."""
+
+    def run_ocr(self, user_id: str, filename: str, content: bytes) -> AsyncIterator[bytes]:
+        raise CapabilityNotSupported(self.agent_id, "ocr")
+
+    async def upload_document(
+        self, user_id: str, filename: str, content_type: str, data: bytes
+    ) -> AgentResponse:
+        raise CapabilityNotSupported(self.agent_id, "documents")
