@@ -4,10 +4,12 @@ from registry import AGENTS
 from .base import AgentAdapter
 from .contract_http import ContractHTTPAdapter
 from .external import ExternalAPIAdapter
+from .ocr import OCRAdapter
 
 _ADAPTER_CLASSES: dict[str, type[AgentAdapter]] = {
     "contract": ContractHTTPAdapter,
     "external": ExternalAPIAdapter,
+    "ocr": OCRAdapter
 }
 
 _INSTANCES: dict[str, AgentAdapter] = {}
