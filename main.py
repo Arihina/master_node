@@ -1,9 +1,11 @@
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
+from adapters.base import CapabilityNotSupported
 from config import settings
 from adapters import close_all
 from api import meta, proxy, chat
@@ -16,6 +18,15 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(lifespan=lifespan)
+
+
+@app.exception_handler(CapabilityNotSupported)
+async def _capability_handler(request: Request, exc: CapabilityNotSupported):
+    return JSONResponse(
+        status_code=404,
+        content={
+            "detail": f"Агент {exc.agent_id} не поддерживает '{exc.capability}'"},
+    )
 
 app.add_middleware(
     CORSMiddleware,

@@ -1,4 +1,4 @@
-from .base import AgentAdapter, AgentResponse, AgentUnavailable
+from .base import AgentAdapter, AgentResponse, AgentUnavailable, CapabilityNotSupported
 from .factory import get_adapter, close_all
 
 __all__ = [
