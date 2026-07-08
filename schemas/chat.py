@@ -25,4 +25,4 @@ class FeedbackRequest(BaseModel):
 class SmartChatRequest(BaseModel):
     message: str
     agent_id: str | None = None
-    session_id: int | None = None
+    session_id: str | None = None
