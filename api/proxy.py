@@ -59,7 +59,8 @@ async def set_feedback(
     user_id: str = Depends(get_user_id),
 ):
     check_agent(agent_id)
-    return relay(await get_adapter(agent_id).set_feedback(user_id, message_id, payload.model_dump()))
+    return relay(await get_adapter(agent_id).set_feedback(
+        user_id, message_id, payload.model_dump(exclude_unset=True)))
 
 
 @router.get("/messages/{message_id}/feedback")
