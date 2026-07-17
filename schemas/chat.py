@@ -13,16 +13,6 @@ class RenameSessionRequest(BaseModel):
     title: str
 
 
-class ChatRequest(BaseModel):
-    message: str
-
-
 class FeedbackRequest(BaseModel):
     vote: int | None = None
     comment: str | None = None
-
-
-class SmartChatRequest(BaseModel):
-    message: str
-    agent_id: str | None = None
-    session_id: str | None = None
