@@ -50,7 +50,7 @@ class ExternalAPIAdapter(AgentAdapter):
     async def delete_feedback(self, user_id, message_id) -> AgentResponse:
         raise NotImplementedError
 
-    async def stream_chat(self, user_id, session_id, message) -> AsyncIterator[bytes]:
+    async def stream_chat(self, user_id, session_id, message, attachment=None) -> AsyncIterator[bytes]:
         raise NotImplementedError(
             "позвать API вендора, транслировать дельты в {'token': ...}, "
             "сохранить ответ в стор, отдать {'message_id': ...} и [DONE]"
