@@ -63,14 +63,22 @@ class ContractHTTPAdapter(AgentAdapter):
     async def delete_feedback(self, user_id, message_id):
         return await self._req("DELETE", f"/messages/{message_id}/feedback", user_id)
 
-    async def stream_chat(self, user_id, session_id, message):
+    async def stream_chat(self, user_id, session_id, message, attachment=None):
+        url = f"{self._base}/sessions/{session_id}/chat"
+        headers = {"X-User-Id": user_id}
+
+        if attachment is None:
+            request_kwargs = {"json": {"message": message}}
+        else:
+            filename, content = attachment
+            request_kwargs = {
+                "data": {"message": message},
+                "files": {"file": (filename, content)},
+            }
+
         try:
             cm = self._client.stream(
-                "POST",
-                f"{self._base}/sessions/{session_id}/chat",
-                headers={"X-User-Id": user_id},
-                json={"message": message},
-            )
+                "POST", url, headers=headers, **request_kwargs)
             resp = await cm.__aenter__()
         except httpx.ConnectError as e:
             raise AgentUnavailable(self.agent_id, f"агент недоступен: {e}")
