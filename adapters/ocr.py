@@ -51,7 +51,7 @@ class OCRAdapter(AgentAdapter):
             "application/json",
         )
 
-    async def stream_chat(self, user_id, session_id, message):
+    async def stream_chat(self, user_id, session_id, message, attachment=None):
         raise CapabilityNotSupported(self.agent_id, "chat")
         yield b""
 
