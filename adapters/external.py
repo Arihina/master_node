@@ -1,20 +1,24 @@
 from __future__ import annotations
 
-from typing import AsyncIterator
-
 from registry import AgentInfo
-from .base import AgentAdapter, AgentResponse
+from .base import AgentAdapter, ProxyResult
 
 
 class ExternalAPIAdapter(AgentAdapter):
     """СКЕЛЕТ. Агент поверх чужого API.
 
-    Ключевое отличие от contract-агента: у вендора НЕТ ни сессий, ни
-    message_id, ни фидбэка. Чтобы соблюсти контракт платформы, адаптер:
-      * сам хранит сессии/сообщения/фидбэк в общем сторе (Postgres);
-      * транслирует дельты стрима вендора в канонические {"token": ...};
-      * синтезирует message_id и финальный [DONE];
-      * держит креды вендора у себя (наружу/клиенту не отдаются).
+    Ключевое отличие от contract-агента: у вендора НЕТ ни completion-объектов,
+    ни conversations, ни фидбэка в нашем формате. Чтобы соблюсти контракт
+    платформы, адаптер должен САМ:
+      * распознавать path (`/v1/chat/completions`, `.../feedback`,
+        `/v1/platform/conversations...`) и обслуживать его своими силами —
+        мастер просто форвардит method+path+body, дальше адаптер сам решает,
+        что с этим делать;
+      * для генерации — звать API вендора и транслировать дельты его стрима в
+        канонические `chat.completion.chunk` (см. epoz/architecture_target.md);
+      * хранить completions/conversations/фидбэк в общем сторе (Postgres) —
+        у вендора для этого нет своего хранилища с нужной формой;
+      * держать креды вендора у себя (наружу/клиенту не отдаются).
 
     Транспорт в реестре: transport="external", config={...вендорские поля...}.
     """
@@ -25,34 +29,8 @@ class ExternalAPIAdapter(AgentAdapter):
         # self._store = ConversationStore(...)
         # self._client = httpx.AsyncClient(base_url=...)
 
-    async def create_session(self, user_id, title) -> AgentResponse:
+    async def proxy(self, method, path, user_id, body=None, content_type=None) -> ProxyResult:
         raise NotImplementedError(
-            "создать запись сессии в общем сторе, вернуть {'id': ...}")
-
-    async def list_sessions(self, user_id) -> AgentResponse:
-        raise NotImplementedError
-
-    async def get_messages(self, user_id, session_id) -> AgentResponse:
-        raise NotImplementedError
-
-    async def rename_session(self, user_id, session_id, title) -> AgentResponse:
-        raise NotImplementedError
-
-    async def delete_session(self, user_id, session_id) -> AgentResponse:
-        raise NotImplementedError
-
-    async def set_feedback(self, user_id, message_id, body) -> AgentResponse:
-        raise NotImplementedError
-
-    async def get_feedback(self, user_id, message_id) -> AgentResponse:
-        raise NotImplementedError
-
-    async def delete_feedback(self, user_id, message_id) -> AgentResponse:
-        raise NotImplementedError
-
-    async def stream_chat(self, user_id, session_id, message, attachment=None) -> AsyncIterator[bytes]:
-        raise NotImplementedError(
-            "позвать API вендора, транслировать дельты в {'token': ...}, "
-            "сохранить ответ в стор, отдать {'message_id': ...} и [DONE]"
+            "разобрать path, обслужить его поверх API вендора и общего "
+            "стора, вернуть ProxyResult(status, content_type, body)"
         )
-        yield b""
