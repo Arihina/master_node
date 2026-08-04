@@ -1,33 +1,33 @@
 from __future__ import annotations
 
 import json
-import uuid
 
 import httpx
 
 from config import settings
 from registry import AgentInfo
 
-from .base import AgentAdapter, AgentResponse, AgentUnavailable, CapabilityNotSupported
+from .base import AgentAdapter, AgentUnavailable, ProxyResult
 
 
 class OCRAdapter(AgentAdapter):
-    """Файл-в/текст-из, без реальных сессий, сообщений и фидбэка.
-
-    create_session синтезирует opaque id локально — ocr_agent не знает о
-    сессиях вообще, но паре agent_id/session_id на стороне мастера нужен
-    хоть какой-то id. list_sessions/get_messages/rename/delete/feedback-методы
-    — честные заглушки (404), а не падение, если кто-то дёрнет
-    /agents/ocr/sessions напрямую.
-    """
+    """Файл-в/текст-из, без чата и без сессий — реализует только capability
+    run_ocr. Не участвует в контракте /v1/chat/completions вообще: proxy()
+    честно отвечает 404 на любой путь, а не падает и не выдумывает ответ."""
 
     def __init__(self, agent: AgentInfo):
         self.agent_id = agent.id
         self._url = agent.url
         self._client = httpx.AsyncClient(timeout=settings.agent_timeout)
 
-    async def create_session(self, user_id: str, title: str | None) -> AgentResponse:
-        return AgentResponse(200, json.dumps({"id": str(uuid.uuid4())}), "application/json")
+    async def proxy(self, method, path, user_id, body=None, content_type=None) -> ProxyResult:
+        async def _not_found():
+            err = {"error": {
+                "message": f"У ocr нет '{path}' — это не contract-агент",
+                "type": "not_found_error", "param": None, "code": None,
+            }}
+            yield json.dumps(err, ensure_ascii=False).encode()
+        return ProxyResult(status=404, content_type="application/json", body=_not_found())
 
     async def run_ocr(self, user_id, filename, content):
         try:
@@ -43,38 +43,6 @@ class OCRAdapter(AgentAdapter):
         text = resp.json().get("text", "")
         yield f"data: {json.dumps({'token': text}, ensure_ascii=False)}\n\n".encode()
         yield b"data: [DONE]\n\n"
-
-    async def _not_supported(self) -> AgentResponse:
-        return AgentResponse(
-            404,
-            json.dumps({"detail": "У ocr нет сессий, сообщений и фидбэка"}),
-            "application/json",
-        )
-
-    async def stream_chat(self, user_id, session_id, message, attachment=None):
-        raise CapabilityNotSupported(self.agent_id, "chat")
-        yield b""
-
-    async def list_sessions(self, user_id: str) -> AgentResponse:
-        return AgentResponse(200, json.dumps({"id": str(uuid.uuid4())}).encode(), "application/json")
-
-    async def get_messages(self, user_id: str, session_id: str) -> AgentResponse:
-        return AgentResponse(200, json.dumps({"id": str(uuid.uuid4())}).encode(), "application/json")
-
-    async def rename_session(self, user_id: str, session_id: str, title: str) -> AgentResponse:
-        return AgentResponse(200, json.dumps({"id": str(uuid.uuid4())}).encode(), "application/json")
-
-    async def delete_session(self, user_id: str, session_id: str) -> AgentResponse:
-        return AgentResponse(200, json.dumps({"id": str(uuid.uuid4())}).encode(), "application/json")
-
-    async def set_feedback(self, user_id: str, message_id: str, body: dict) -> AgentResponse:
-        return AgentResponse(200, json.dumps({"id": str(uuid.uuid4())}).encode(), "application/json")
-
-    async def get_feedback(self, user_id: str, message_id: str) -> AgentResponse:
-        return AgentResponse(200, json.dumps({"id": str(uuid.uuid4())}).encode(), "application/json")
-
-    async def delete_feedback(self, user_id: str, message_id: str) -> AgentResponse:
-        return AgentResponse(200, json.dumps({"id": str(uuid.uuid4())}).encode(), "application/json")
 
     async def aclose(self) -> None:
         await self._client.aclose()
