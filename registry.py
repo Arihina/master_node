@@ -118,7 +118,6 @@ AGENTS: dict[str, AgentInfo] = {
         - Помоги заполнить документ по образцу.
         """,
         transport="contract",
-        capabilities={"chat", "documents", "ocr"},
         routable=True,
         enabled=True,
     ),
