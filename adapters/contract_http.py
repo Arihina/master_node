@@ -43,7 +43,7 @@ class ContractHTTPAdapter(AgentAdapter):
                 content=body if body else None,
             )
             resp = await cm.__aenter__()
-        except httpx.ConnectError as e:
+        except httpx.TransportError as e:
             raise AgentUnavailable(self.agent_id, f"агент недоступен: {e}")
 
         status = resp.status_code
