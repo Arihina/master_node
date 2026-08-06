@@ -1,17 +1,36 @@
 from __future__ import annotations
 
 import json
+from typing import Awaitable
 
 from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, File
 
 from auth import get_user_id
+from registry import AGENTS
 from adapters import get_adapter
 from api.deps import check_agent, require_capability, streaming_or_error, proxy_response, master_router
 
 router = APIRouter(tags=["chat"])
 
 
-def _extract_model_and_question(body: dict) -> tuple[str, str]:
+def _extract_text(content) -> str:
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return "\n".join(
+            str(p.get("text", "")) for p in content
+            if isinstance(p, dict) and p.get("type") == "text"
+        )
+    return ""
+
+
+def _has_file_part(content) -> bool:
+    if not isinstance(content, list):
+        return False
+    return any(isinstance(p, dict) and p.get("type") == "file" for p in content)
+
+
+def _extract_model_and_question(body: dict) -> tuple[str, str, bool]:
     model = body.get("model") or "auto"
     messages = body.get("messages")
 
@@ -23,7 +42,26 @@ def _extract_model_and_question(body: dict) -> tuple[str, str]:
         raise HTTPException(
             422, 'последнее сообщение должно иметь role="user"')
 
-    return model, str(last.get("content", ""))
+    content = last.get("content", "")
+    return model, _extract_text(content), _has_file_part(content)
+
+
+def _resolve_agent(model: str, question: str, has_file: bool) -> Awaitable[str] | str:
+    if has_file:
+        capable = [a.id for a in AGENTS.values()
+                   if a.enabled and "attachments" in a.capabilities]
+        if model != "auto":
+            if model not in capable:
+                raise HTTPException(
+                    422, f"Агент {model} не поддерживает вложения")
+            return model
+        if not capable:
+            raise HTTPException(
+                422, "Нет доступного агента, поддерживающего вложения")
+
+        return capable[0]
+
+    return model if model != "auto" else master_router.route(question)
 
 
 @router.post("/v1/chat/completions")
@@ -34,16 +72,16 @@ async def chat_completions(request: Request, user_id: str = Depends(get_user_id)
     except json.JSONDecodeError:
         raise HTTPException(422, "Некорректный JSON")
 
-    model, question = _extract_model_and_question(body)
+    model, question, has_file = _extract_model_and_question(body)
 
-    agent_id = model if model != "auto" else await master_router.route(question)
+    resolved = _resolve_agent(model, question, has_file)
+    agent_id = resolved if isinstance(resolved, str) else await resolved
     check_agent(agent_id)
 
     forward_body = {**body, "model": agent_id}
     payload = json.dumps(forward_body, ensure_ascii=False).encode()
 
     adapter = get_adapter(agent_id)
-    
     return await proxy_response(
         adapter.proxy("POST", "/v1/chat/completions",
                       user_id, payload, "application/json")

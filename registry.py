@@ -118,6 +118,9 @@ AGENTS: dict[str, AgentInfo] = {
         - Помоги заполнить документ по образцу.
         """,
         transport="contract",
+        # "attachments" — агент умеет принимать {"type": "file", ...}
+        # content-части в messages[]
+        capabilities={"chat", "attachments"},
         routable=True,
         enabled=True,
     ),
