@@ -37,7 +37,8 @@ AGENTS: dict[str, AgentInfo] = {
         - Какие требования предъявляются к участникам закупки?
         - Что сказано в Едином положении о закупках Ростеха?
         - Каков порядок проведения конкурса?
-        """
+        """,
+        contract_forms={"chat_completions", "responses"}
     ),
 
     "chat": AgentInfo(
@@ -59,7 +60,8 @@ AGENTS: dict[str, AgentInfo] = {
         - Помоги составить заметку на тему.
         - Помоги придумать идею проекта.
         - Объясни простыми словами.
-        """
+        """,
+        contract_forms={"chat_completions", "responses"}
     ),
 
     "ocr": AgentInfo(
@@ -100,7 +102,8 @@ AGENTS: dict[str, AgentInfo] = {
         - Расскажи про метод Рунге-Кутта.
         - Для чего нужно уравнение Навье-Стокса?
         - Расскажи про численные методы.
-        """
+        """,
+        contract_forms={"chat_completions", "responses"}
     ),
 
     "document_chat": AgentInfo(
@@ -120,13 +123,7 @@ AGENTS: dict[str, AgentInfo] = {
         - Помоги заполнить документ по образцу.
         """,
         transport="contract",
-        # "attachments" — агент умеет принимать {"type": "file", ...}
-        # content-части в messages[] (см. api/chat.py::_resolve_agent).
-        # Не путать со старым (удалённым) capability "documents" — та была
-        # про отдельную single-shot ручку /agents/{id}/documents, которой
-        # ни у кого нет; это про другое.
         capabilities={"chat", "attachments"},
-        routable=True,
-        enabled=True,
+        contract_forms={"chat_completions", "responses"}
     ),
 }
