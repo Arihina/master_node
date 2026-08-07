@@ -1,12 +1,12 @@
 # Master Router
 
 Мастер-агент: по запросу пользователя определяет нужного ИИ-агента и
-проксирует к нему запросы. Доступ к агентам — только через мастер. API
-мастера и канонический контракт агентов совместимы с OpenAI Chat Completions
-(`/v1/chat/completions`) — см. [Контракт агента](#контракт-агента). На
-текущем этапе все агенты — локальные сервисы на разных портах; разнородность
-транспорта спрятана за слоем адаптеров, поэтому подключение агента с другим
-API не меняет мастер.
+проксирует к нему запросы. Доступ к агентам — только через мастер. Мастер
+поддерживает **обе** формы OpenAI на входе — Chat Completions
+(`/v1/chat/completions`) и Responses (`/v1/responses`) — см. [Контракт
+агента](#контракт-агента). На текущем этапе все агенты — локальные сервисы
+на разных портах; разнородность транспорта спрятана за слоем адаптеров,
+поэтому подключение агента с другим API не меняет мастер.
 
 Мастер **stateless**: не хранит чаты, сообщения и фидбэк — всё это живёт у
 агентов и скоупится по `X-User-Id`. Задача мастера — роутинг (`model: "auto"`),
@@ -34,23 +34,46 @@ API не меняет мастер.
 
 ## Роутинг
 
-`MasterRouter.route()` определяет агента каскадом из двух слоёв. Каждый
-следующий слой запускается, только если предыдущий не дал ответа:
+`MasterRouter.route()` первым делом строит `candidates` — множество
+`{a.id for a in AGENTS.values() if a.enabled and a.routable}`. Это
+единственное место, где `routable=False`/`enabled=False` реально влияют на
+авто-роутинг — раньше (до правки) `embedding_router`/`llm_router` перебирали
+весь реестр без разбора, и агент вроде OCR (`routable=False`) теоретически
+мог быть выбран по семантическому совпадению, просто падая дальше в
+`CapabilityNotSupported`. Сейчас исключён на первом же шаге.
+
+Дальше — каскад из двух слоёв, каждый следующий запускается только если
+предыдущий не дал ответа:
 
 1. **embedding_router** — семантическая близость запроса к описаниям агентов
-   через `intfloat/multilingual-e5-small` (косинусная мера, порог отсечения).
+   через `intfloat/multilingual-e5-small` (косинусная мера, порог отсечения),
+   вычисляется только среди `candidates`.
 2. **llm_router** — классификация запроса моделью `gemma2:2b` через Ollama,
-   ответ форсится в JSON.
+   ответ форсится в JSON; результат сверяется с тем же множеством кандидатов,
+   что ушло в промпт — если модель «угадает» агента не из списка, ответ
+   отбрасывается, а не пропускается по факту существования id в реестре.
 
-Если ни один слой не дал валидного агента, запрос уходит на `FALLBACK_AGENT`
-(`chat`). Блокирующие вызовы (`encode`, `client.chat`) вынесены в
+Если ни один слой не дал валидного агента — `FALLBACK_AGENT` (`chat`),
+жёстко прописанный, без собственной проверки на `routable`/`enabled`
+(единственное сознательное исключение — запасной вариант обязан сработать
+всегда). Блокирующие вызовы (`encode`, `client.chat`) вынесены в
 `asyncio.to_thread`, чтобы не блокировать event loop.
 
-Роутинг срабатывает только при `model: "auto"` в `POST /v1/chat/completions`
-(см. ниже) — не отдельным эндпоинтом. В нём участвуют только агенты с
-`routable=True`. Инструменты без диалога (OCR) помечены `routable=False` — их
-нельзя выбрать по тексту, к ним обращаются напрямую по id через их
-capability-маршрут.
+Роутинг срабатывает только при `model: "auto"` (или отсутствии `model`) — не
+отдельным эндпоинтом, и одинаково в обеих формах, `/v1/chat/completions` и
+`/v1/responses`, — общий `MasterRouter`, разные экстракторы вопроса из тела
+запроса на входе (`messages[-1].content` vs `input`).
+
+**Вложение — отдельная, более жёсткая проверка**, идущая ДО семантического
+роутинга, а не наравне с ним: если в текущем сообщении/item'е есть ссылка на
+файл, `candidates` сразу сужается до агентов с `"attachments"` в
+`capabilities`, и семантический роутер к таким запросам не обращается вовсе
+— файл однозначно требует конкретного умения, сравнивать по смыслу текста
+здесь нечего. Если подходящих агентов несколько (сейчас на практике не
+бывает — только `document_chat`), берётся первый по алфавиту id, без
+попытки выбрать «умнее»: `routing/router_service.py` пока не умеет
+ограничивать embedding/llm-этапы подмножеством агентов на лету, это
+осознанное упрощение, а не забытое место.
 
 ## Слой адаптеров
 
@@ -65,6 +88,7 @@ capability-маршрут.
 | `contract` | `ContractHTTPAdapter`| диалоговые агенты на каноническом контракте (ЕПоЗ)|
 | `external` | `ExternalAPIAdapter` | чужой API вендора (скелет; беседы хранит сам)   |
 | `ocr`      | `OCRAdapter`         | инструмент файл-в/текст-из, без диалога         |
+| `cognitum` | `CognitumAdapter`    | агенты на оркестраторе (план)                   |
 
 `proxy()` возвращает `ProxyResult(status, content_type, body: AsyncIterator[bytes])`.
 Статус и content-type апстрима известны сразу — httpx получает заголовки
@@ -83,10 +107,11 @@ capability-маршрут.
 **возможности** (capabilities — необязательные умения, есть не у каждого).
 
 Ядро — единственный `@abstractmethod` в `base.py`: `proxy()`. Реализует любой
-адаптер, но по-разному: OCR отвечает `404` на любой путь (агент не
-реализует `/v1/chat/completions`), `ExternalAPIAdapter` — `NotImplementedError` (скелет).
+адаптер, но по-разному: OCR честно отвечает `404` на любой путь (агент не
+реализует `/v1/chat/completions` вообще — это не забытая функциональность, а
+осознанное «не умею»), `ExternalAPIAdapter` — `NotImplementedError` (скелет).
 
-Возможности — отдельные необязательные методы
+Возможности — отдельные необязательные методы с дефолтом «не умею»
 (`raise CapabilityNotSupported`), не входящие в `proxy()`/новый контракт.
 Каждая возможность:
 
@@ -100,14 +125,15 @@ capability-маршрут.
 но не реализована в адаптере) в `main.py` висит обработчик
 `CapabilityNotSupported` → `404` в едином формате ошибок (см. ниже).
 `GET /v1/models` не отдаёт `capabilities` в объекте модели (в отличие от
-старого `GET /agents`) — это решение под OpenAI-совместимость
-объекта `model`.
+старого `GET /agents`) — это осознанное решение под OpenAI-совместимость
+объекта `model`; если фронту нужны capabilities агента для UI, это отдельный
+вопрос вне текущего контракта.
 
 ## Эндпоинты мастера
 
 Все проксирующие эндпоинты требуют заголовок `X-User-Id: <uuid>` и
 пробрасывают его агенту без изменений. Статус-коды и тела ответов агента
-проходят насквозь — мастер
+проходят насквозь (включая `204 No Content` и `404` на чужой ресурс) — мастер
 их не переинтерпретирует.
 
 ### Служебные
@@ -148,8 +174,8 @@ OpenAI-контракта, оставлен как внутренняя debug-р
 - `model: "auto"` (или поле отсутствует) → мастер берёт последнее сообщение с
   `role: "user"`, прогоняет через `MasterRouter.route()`, подставляет реальный
   `agent_id` в поле `model` исходящего запроса — тем самым он же приходит
-  эхом в `model` ответа клиенту. 
-  Это единственный канал, которым клиент узнаёт, кого выбрал роутер: отдельных
+  эхом в `model` ответа клиенту (агент просто эхует, что получил). Это
+  единственный канал, которым клиент узнаёт, кого выбрал роутер: отдельных
   заголовков (`X-Agent-Id`) или SSE-события `metadata`, как раньше, больше
   нет — `model` ответа и есть искомый `agent_id`, его же клиент использует
   дальше как `{agent_id}` в путях ниже.
@@ -157,6 +183,39 @@ OpenAI-контракта, оставлен как внутренняя debug-р
 Стрим/нестрим-форматы ответа — как в [контракте агента](#контракт-агента),
 мастер их не переписывает, только проксирует байты как есть (тем же `proxy()`,
 что и всё остальное).
+
+### `POST /v1/responses`
+
+Второй вход для генерации, форма Responses API. Работает так же, как
+`/v1/chat/completions` (тот же `MasterRouter`, та же подстановка реального
+`agent_id` в `model` при `"auto"`, тот же байтовый `proxy()`), но с
+принципиальным отличием: **никакого неявного перевода между формами**.
+
+```json
+{
+  "model": "auto",
+  "input": "что такое ЕПоЗ",
+  "stream": true
+}
+```
+
+- `model` — конкретный `agent_id`, у которого в `contract_forms` заявлено
+  `"responses"` → проброс. Если у агента этой формы нет — `422`
+  (`"Агент epoz не поддерживает форму Responses API"`), а не попытка
+  подставить его через `/v1/chat/completions` за него.
+- `model: "auto"` → кандидаты — агенты с `"responses"` в `contract_forms`
+  (и `routable`/`enabled`, как обычно); если ни одного — `422`, не тихий
+  выбор чего попало.
+- Вложение в `input` (`{"type": "input_file", ...}`) — та же логика, что и
+  у Chat Completions: сужает кандидатов до `"attachments"` в `capabilities`,
+  причём **на пересечении** с `"responses"` в `contract_forms` — агенту
+  нужны оба флага одновременно, чтобы его выбрал `"auto"` с вложением в
+  этой форме.
+
+Это разделение форм — сознательный принцип, а не недоделка: мастер не
+должен домысливать за агента, какую форму тот «имел в виду». Если агенту
+нужна и Chat Completions, и Responses — это две отдельные записи флагов в
+`contract_forms`, обе реализованные агентом реально, не одна за другую.
 
 ### Generic proxy агента
 
@@ -175,6 +234,7 @@ POST   /agents/{agent_id}/v1/chat/completions/{completion_id}/feedback
 GET    /agents/{agent_id}/v1/chat/completions/{completion_id}/feedback
 DELETE /agents/{agent_id}/v1/chat/completions/{completion_id}/feedback
 GET    /agents/{agent_id}/v1/chat/completions/{completion_id}/sources
+GET    /agents/{agent_id}/v1/responses/{completion_id}
 POST   /agents/{agent_id}/v1/platform/conversations
 GET    /agents/{agent_id}/v1/platform/conversations
 GET    /agents/{agent_id}/v1/platform/conversations/{conversation_id}/messages
@@ -182,8 +242,15 @@ PATCH  /agents/{agent_id}/v1/platform/conversations/{conversation_id}
 DELETE /agents/{agent_id}/v1/platform/conversations/{conversation_id}
 ```
 
+`GET .../v1/responses/{completion_id}` — тот же ресурс, что и
+`GET .../v1/chat/completions/{completion_id}`, просто сериализован в форме
+`response`, а не `chat.completion` (у агентов, реализующих обе формы — id
+принимается в любом виде, `chatcmpl-`/`resp_`/голый UUID). Фидбэк и источники
+остаются под одним, общим для обеих форм путём — не дублируются под
+`/v1/responses/...`, см. документацию агента.
+
 Список выше — не то, что знает мастер (он его не хранит и не валидирует
-детально), а то, что сейчас реализует агент, например, заглушка epoz и tech_rag. Если tech_rag
+детально), а то, что сейчас реализует эталонный агент epoz. Если epoz
 добавит новую ручку под `/v1/...` — она автоматически станет доступна через
 мастер, без изменений на его стороне.
 
@@ -200,25 +267,40 @@ DELETE /agents/{agent_id}/v1/platform/conversations/{conversation_id}
 | Метод  | Путь                          | Возможность | Ответ                       |
 |--------|-------------------------------|-------------|-----------------------------|
 | `POST` | `/agents/{agent_id}/ocr`      | `ocr`       | SSE (`token` + `[DONE]`)    |
-| `POST` | `/agents/{agent_id}/documents`| `documents` | статус загрузки             |
 
-Не входит в OpenAI-контракт и не тронуто переходом на него — вложения
-(`multipart` → мультимодальные `content parts`) будут переработаны отдельным
-этапом.
+Не входит в OpenAI-контракт — единственная capability-ручка мастера,
+пережившая переход, специально для инструментов без диалога (сейчас — OCR).
+
+`capabilities` агента используется в двух ролях, которые легко перепутать:
+- как источник для **capability-маршрутов выше** (`ocr` → `/agents/{id}/ocr`);
+- как **фильтр для авто-роутинга** при вложениях (`attachments` →
+  агент принимает `file`/`input_file` части в `messages`/`input`, см.
+  «Роутинг» выше) — это НЕ маршрут, просто флаг, который смотрит роутер.
+
+У `document_chat` в реестре — `capabilities={"chat", "attachments"}`, не
+`{"chat", "documents", "ocr"}`, как было раньше: те два флага были
+пережитком старого контракта (single-shot ручка `/agents/{id}/documents`,
+которой ни у кого нет) и вводили в заблуждение — `require_capability`
+пропускал бы вызов дальше, а адаптер честно падал в `CapabilityNotSupported`.
 
 ## Контракт агента
 
 Мастер форвардит по контракту, а не по конкретному агенту, — поэтому каждый
-contract-агент обязан реализовывать одинаковую форму API, совместимую с
-OpenAI Chat Completions. Добавление нового агента, соблюдающего контракт,
-требует только записи в `registry.py`.
+contract-агент обязан реализовывать одинаковую форму API для каждой из
+форм, которую заявляет в `contract_forms`. Добавление нового агента,
+соблюдающего контракт, требует только записи в `registry.py`.
 
-Обязательная часть контракта:
+Обязательная часть контракта (единая для обеих форм OpenAI, различается
+только в деталях самой формы — путь, тело запроса, форма стрима):
 
 - скоупинг всех ресурсов по `X-User-Id`; обращение к чужому ресурсу → `404`;
-- `POST /v1/chat/completions` — **stateless**: клиент присылает всю историю
-  диалога в `messages[]`, агент её не хранит и не переиспользует между
-  вызовами. Формат ответа/стрима — `chat.completion` / `chat.completion.chunk`:
+- `POST /v1/chat/completions` и/или `POST /v1/responses` — **stateless**:
+  клиент присылает всю историю диалога в `messages[]`/`input`, агент её не
+  хранит и не переиспользует между вызовами (единственное исключение —
+  необязательный `conversation_id`, платформенное расширение, см. ниже, и
+  то только в форме Responses, где агент может подтягивать текстовую
+  историю из своей БД). Формат ответа/стрима: `chat.completion` /
+  `chat.completion.chunk` для Chat Completions,
 
   ```
   data: {"id":"chatcmpl-<uuid>","object":"chat.completion.chunk","created":<ts>,"model":"epoz","choices":[{"index":0,"delta":{"role":"assistant"},"finish_reason":null}]}
@@ -226,17 +308,21 @@ OpenAI Chat Completions. Добавление нового агента, соб�
   data: {"id":"chatcmpl-<uuid>","object":"chat.completion.chunk","created":<ts>,"model":"epoz","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}
   data: [DONE]
   ```
-  `id` (`chatcmpl-<uuid>`) — ключ, по которому дальше доступны повторное
-  чтение, фидбэк и источники;
+  типизированные SSE-события (`response.created`, `response.output_text.delta`,
+  `response.completed`, ...) для Responses. `id` (`chatcmpl-<uuid>` /
+  `resp_<uuid>`) — ключ, по которому дальше доступны повторное чтение,
+  фидбэк и источники;
 
 - ошибки — единый формат `{"error": {"message": "...", "type": "...", "param": null, "code": null}}`
   вместо FastAPI-дефолта `{"detail": ...}`;
-- платформенные (не входящие в OpenAI-стандарт) расширения — необязательное
-  поле `conversation_id` в `/v1/chat/completions` (привязка сообщения к чату
-  для UI, не участвует в сборке контекста) и `/v1/platform/conversations`
-  (CRUD чатов: создать, список, история, переименовать, удалить).
+- платформенные (не входящие ни в одну спеку OpenAI) расширения —
+  необязательное поле `conversation_id` в обеих формах (привязка сообщения
+  к чату для UI; в форме Responses дополнительно — источник истории при
+  сборке контекста) и `/v1/platform/conversations` (CRUD чатов: создать,
+  список, история, переименовать, удалить), общий для обеих форм.
 
-Полная спецификация ручек агента и схема БД — в README.md агента.
+Полная спецификация ручек агента и схема БД — в документации агента
+(`epoz/README.md`, `epoz/architecture_target.md`).
 
 ## Реестр агентов
 
@@ -249,9 +335,12 @@ class AgentInfo:
     name: str
     url: str
     description: str
-    enabled: bool = True
-    transport: str = "contract"          # "contract" | "external" | "ocr"
+    transport: str = "contract"          # "contract" | "external" | "ocr" | "cognitum"
     config: dict = field(default_factory=dict)
+    enabled: bool = True
+    capabilities: set[str] = field(default_factory=lambda: {"chat"})
+    routable: bool = True
+    contract_forms: set[str] = field(default_factory=lambda: {"chat_completions"})
 
 
 AGENTS: dict[str, AgentInfo] = {
@@ -269,9 +358,21 @@ AGENTS: dict[str, AgentInfo] = {
   чем содержательнее (с примерами запросов), тем точнее роутинг.
 - `enabled=False` исключает агента из `/v1/models` и из роутинга.
 - `transport` выбирает адаптер; у `contract` пустой `url` → `503`.
-- `capabilities` — умения агента; проверяются на capability-маршрутах.
+- `capabilities` — умения агента; часть используется как capability-маршруты
+  (`ocr`), часть — как фильтр для роутинга при вложениях (`attachments`),
+  см. «Возможности (capabilities)» выше — это не взаимозаменяемые списки.
 - `routable=False` убирает агента из кандидатов авто-роутинга (`model: "auto"`).
+- `contract_forms` — какую(ие) форму(ы) генерации агент реализует на входной
+  точке (`"chat_completions"`, `"responses"`). Мастер не переводит между
+  ними сам — агент без нужной формы в `POST /v1/{форма}` получает `422`, а
+  не подмену. По умолчанию — только `"chat_completions"`, менять придётся
+  вручную, когда агент реально реализует ещё и `/v1/responses`.
 - `config` — пер-агентные переопределения дефолтов из `config.py`.
+
+> На текущем этапе реально запущены **ЕПоЗ**, **slave_chat** (`id: "chat"`),
+> **document_chat** и **OCR**. Остальным агентам имеет смысл выставить
+> `enabled=False`, пока их сервисы не подняты, — иначе роутер может выбрать
+> агента без рабочего `url`.
 
 ## Конфигурация
 
@@ -396,6 +497,29 @@ curl http://127.0.0.1:8000/agents/epoz/v1/chat/completions/$ID/sources -H "X-Use
 curl -X POST http://127.0.0.1:8000/agents/epoz/v1/platform/conversations \
   -H "Content-Type: application/json" -H "X-User-Id: $U" -d '{"title": "Тестовый чат"}'
 curl http://127.0.0.1:8000/agents/epoz/v1/platform/conversations -H "X-User-Id: $U"
+
+# ============ форма Responses ============
+
+# авто-роутинг + генерация, стримом — тот же MasterRouter, что и у Chat Completions
+curl -N -X POST http://127.0.0.1:8000/v1/responses \
+  -H "Content-Type: application/json" -H "X-User-Id: $U" \
+  -d '{"model": "auto", "stream": true, "input": "что такое ЕПоЗ"}'
+
+# у агента без формы responses -> 422, без подмены формы
+curl -X POST http://127.0.0.1:8000/v1/responses \
+  -H "Content-Type: application/json" -H "X-User-Id: $U" \
+  -d '{"model": "ocr", "input": "привет"}'
+# -> {"error": {"message": "Агент ocr не поддерживает форму Responses API", ...}}
+
+# вложение при auto — роутер вообще не участвует, кандидаты сразу сужены
+# до agent.capabilities содержит "attachments" (сейчас — только document_chat)
+curl -X POST http://127.0.0.1:8000/v1/responses \
+  -H "Content-Type: application/json" -H "X-User-Id: $U" \
+  -d '{"model": "auto", "input": [{"role": "user", "content": [
+        {"type": "input_text", "text": "какая сумма в накладной?"},
+        {"type": "input_file", "file_id": "file-85b365de-..."}
+      ]}]}'
+# в ответе "model":"document_chat" — единственный кандидат с attachments+responses
 
 # OCR: файл-в/текст-из, напрямую по id (без диалога), поле файла — file
 curl -N -X POST http://127.0.0.1:8000/agents/ocr/ocr \
