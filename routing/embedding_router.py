@@ -17,13 +17,20 @@ agent_vectors = {
 }
 
 
-def route(message: str) -> dict:
+def route(message: str, candidates: set[str] | None = None) -> dict:
     q = model.encode(f"query: {message}", normalize_embeddings=True)
 
-    scores = []
-    for agent_id, vec in agent_vectors.items():
-        score = float(q @ vec)
-        scores.append((agent_id, score))
+    pool = (
+        agent_vectors.items() if candidates is None
+        else ((aid, vec) for aid, vec in agent_vectors.items() if aid in candidates)
+    )
+    scores = [(agent_id, float(q @ vec)) for agent_id, vec in pool]
+
+    if not scores:
+        return {
+            "decision": "fallback",
+            "scores": [],
+        }
 
     scores.sort(key=lambda x: x[1], reverse=True)
     best_agent, best_score = scores[0]

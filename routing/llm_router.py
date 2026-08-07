@@ -11,13 +11,16 @@ client = Client(host="http://localhost:11434")
 
 def route(
     message: str,
-    candidates: list[str] | None = None
+    candidates: set[str] | list[str] | None = None
 ) -> str:
 
-    if candidates:
-        available_agents = [AGENTS[agent_id] for agent_id in candidates]
+    if candidates is not None:
+        available_agents = [AGENTS[aid] for aid in candidates if aid in AGENTS]
     else:
-        available_agents = AGENTS.values()
+        available_agents = list(AGENTS.values())
+
+    if not available_agents:
+        return None
 
     agents_text = "\n".join(
         f"- {agent.id}: {agent.description}"
@@ -48,4 +51,6 @@ def route(
     )
     agent = json.loads(response["message"]["content"]).get("agent")
 
-    return agent if agent in AGENTS else None
+    valid_ids = {a.id for a in available_agents}
+
+    return agent if agent in valid_ids else None
