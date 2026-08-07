@@ -8,7 +8,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from config import settings
 from adapters import close_all, CapabilityNotSupported
-from api import meta, chat, agent_proxy
+from api import meta, chat, responses, agent_proxy
 
 
 @asynccontextmanager
@@ -29,6 +29,7 @@ app.add_middleware(
 
 app.include_router(meta.router)
 app.include_router(chat.router)
+app.include_router(responses.router)
 app.include_router(agent_proxy.router)
 
 

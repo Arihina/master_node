@@ -12,6 +12,8 @@ class AgentInfo:
     enabled: bool = True
     capabilities: set[str] = field(default_factory=lambda: {"chat"})
     routable: bool = True
+    contract_forms: set[str] = field(
+        default_factory=lambda: {"chat_completions"})
 
 # extend descriptions and add more examples for query
 
@@ -119,7 +121,10 @@ AGENTS: dict[str, AgentInfo] = {
         """,
         transport="contract",
         # "attachments" — агент умеет принимать {"type": "file", ...}
-        # content-части в messages[]
+        # content-части в messages[] (см. api/chat.py::_resolve_agent).
+        # Не путать со старым (удалённым) capability "documents" — та была
+        # про отдельную single-shot ручку /agents/{id}/documents, которой
+        # ни у кого нет; это про другое.
         capabilities={"chat", "attachments"},
         routable=True,
         enabled=True,
