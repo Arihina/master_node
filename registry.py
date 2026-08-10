@@ -84,6 +84,7 @@ AGENTS: dict[str, AgentInfo] = {
         capabilities={"ocr"},
         routable=False,
         enabled=True,
+        contract_forms=set(),
     ),
 
     "tech_rag": AgentInfo(
