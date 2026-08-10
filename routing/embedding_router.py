@@ -5,7 +5,8 @@ from registry import AGENTS
 from config import settings
 
 model = SentenceTransformer(
-    settings.embedd_model
+    settings.embedd_model,
+    local_files_only=True
 )
 
 THRESHOLD = 0.69
