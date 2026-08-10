@@ -8,8 +8,7 @@ from api.deps import master_router
 
 router = APIRouter(tags=["meta"])
 
-
-MODEL_OWNER = "pass"
+MODEL_OWNER = " "
 
 
 def _model_object(model_id: str, created: int) -> dict:
@@ -21,13 +20,16 @@ def _model_object(model_id: str, created: int) -> dict:
     }
 
 
+def _is_model(agent) -> bool:
+    return agent.enabled and bool(agent.contract_forms)
+
+
 @router.get("/v1/models")
 async def list_models():
     created = int(time.time())
     data = [_model_object(a.id, created)
-            for a in AGENTS.values() if a.enabled]
+            for a in AGENTS.values() if _is_model(a)]
     data.append(_model_object("auto", created))
-
     return {"object": "list", "data": data}
 
 
@@ -39,7 +41,7 @@ async def retrieve_model(model_id: str):
         return _model_object("auto", created)
 
     agent = AGENTS.get(model_id)
-    if agent is None or not agent.enabled:
+    if agent is None or not _is_model(agent):
         raise HTTPException(404, f"Модель {model_id} не найдена")
 
     return _model_object(agent.id, created)

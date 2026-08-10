@@ -37,12 +37,19 @@ async def resolve_agent(form: str, model: str, question: str, has_file: bool) ->
                       if "attachments" in AGENTS[a].capabilities}
 
     if model != "auto":
+        agent = AGENTS.get(model)
+
+        if agent is None or not agent.enabled:
+            raise HTTPException(404, f"Агент {model} не найден или выключен")
+        
         if model not in form_capable:
             raise HTTPException(
                 400, f"Агент {model} не поддерживает форму {form_title}")
+        
         if has_file and model not in candidates:
             raise HTTPException(
                 400, f"Агент {model} не поддерживает вложения")
+        
         return model
 
     if not candidates:
