@@ -19,6 +19,8 @@ class Settings(BaseSettings):
 
     fallback_agent: str = "chat"
 
+    agents_file: str = "agents.yaml"
+
     ollama_model: str
     embedd_model: str
 
