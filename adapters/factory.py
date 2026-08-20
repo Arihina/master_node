@@ -27,6 +27,14 @@ def get_adapter(agent_id: str) -> AgentAdapter:
     return _INSTANCES[agent_id]
 
 
+def invalidate(agent_id: str) -> AgentAdapter | None:
+    return _INSTANCES.pop(agent_id, None)
+
+
+def cached_ids() -> set[str]:
+    return set(_INSTANCES)
+
+
 async def close_all() -> None:
     for adapter in _INSTANCES.values():
         await adapter.aclose()

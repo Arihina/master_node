@@ -8,12 +8,14 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from config import settings
 from adapters import close_all, CapabilityNotSupported
-from api import meta, chat, responses, agent_proxy
+from registry_service import agent_registry
+from api import meta, chat, responses, agent_proxy, admin
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     yield
+    await agent_registry.aclose()
     await close_all()
 
 
@@ -31,12 +33,14 @@ app.include_router(meta.router)
 app.include_router(chat.router)
 app.include_router(responses.router)
 app.include_router(agent_proxy.router)
+app.include_router(admin.router)
 
 
 _ERROR_TYPES = {
     400: "invalid_request_error",
     401: "authentication_error",
     404: "not_found_error",
+    409: "invalid_request_error",
     413: "invalid_request_error",
     415: "invalid_request_error",
     422: "invalid_request_error",
