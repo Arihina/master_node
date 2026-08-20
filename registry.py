@@ -1,130 +1,221 @@
-from dataclasses import dataclass, field
+from __future__ import annotations
+
+import os
+import re
+import tempfile
+from pathlib import Path
+from typing import Literal
+
+import yaml
+from pydantic import (BaseModel, ConfigDict, Field, ValidationError,
+                      field_validator, model_validator)
+
+from config import settings
+
+Transport = Literal["contract", "external", "ocr"]
+ContractForm = Literal["chat_completions", "responses"]
+Capability = Literal["chat", "ocr", "attachments"]
+
+FILE_VERSION = 1
+ROOT = Path(__file__).resolve().parent
+_ID_RE = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
 
 
-@dataclass
-class AgentInfo:
+class RegistryFileError(Exception):
+    """Файл реестра не читается, не парсится или нарушает инварианты."""
+
+
+def normalize_description(text: str) -> str:
+    """Описание участвует в эмбеддинге, поэтому сравнивать его нужно по смыслу,
+    а не побайтово — иначе переформатирование YAML руками будет считаться
+    изменением и триггерить пересчёт вектора."""
+    return " ".join(text.split())
+
+
+class AgentInfo(BaseModel):
+    """Неизменяемый снимок агента. Запрос, уже взявший ссылку на объект,
+    спокойно доработает на нём даже если агента в этот момент обновили —
+    в словаре просто окажется другой объект."""
+    model_config = ConfigDict(frozen=True)
+
     id: str
     name: str
-    url: str
-    description: str
-    transport: str = "contract"
-    config: dict = field(default_factory=dict)
+    url: str = ""
+    description: str = ""
+    transport: Transport = "contract"
+    config: dict = Field(default_factory=dict)
     enabled: bool = True
-    capabilities: set[str] = field(default_factory=lambda: {"chat"})
+    capabilities: set[Capability] = Field(default_factory=lambda: {"chat"})
     routable: bool = True
-    contract_forms: set[str] = field(
+    contract_forms: set[ContractForm] = Field(
         default_factory=lambda: {"chat_completions"})
 
-# extend descriptions and add more examples for query
+    @field_validator("id")
+    @classmethod
+    def _check_id(cls, v: str) -> str:
+        if not _ID_RE.match(v):
+            raise ValueError(
+                "допустимы строчная латиница, цифры и подчёркивание, "
+                "первый символ — буква, до 64 символов "
+                "(id уходит в поле model OpenAI-контракта)")
+        return v
+
+    @field_validator("url")
+    @classmethod
+    def _strip_url(cls, v: str) -> str:
+        return v.strip().rstrip("/")
+
+    @model_validator(mode="after")
+    def _check_consistency(self) -> "AgentInfo":
+        if not self.capabilities:
+            raise ValueError("capabilities не может быть пустым")
+        if self.transport in ("contract", "ocr") and not self.url:
+            raise ValueError(f"url обязателен при transport={self.transport}")
+        if "attachments" in self.capabilities and "chat" not in self.capabilities:
+            raise ValueError("attachments требует chat в capabilities")
+        if self.routable:
+            if not normalize_description(self.description):
+                raise ValueError("routable=true требует непустого description")
+            if not self.contract_forms:
+                raise ValueError(
+                    "routable=true требует непустого contract_forms")
+        return self
+
+    @property
+    def description_key(self) -> str:
+        return normalize_description(self.description)
+
+    @property
+    def adapter_key(self) -> tuple:
+        """Поля, при смене которых адаптер надо пересоздать. Правка description
+        адаптер не трогает — иначе на каждом редактировании текста пересоздаётся
+        httpx-клиент с живым пулом соединений."""
+        return (self.url, self.transport, tuple(sorted(self.config.items(),
+                                                       key=lambda kv: kv[0])))
 
 
-AGENTS: dict[str, AgentInfo] = {
-    "epoz": AgentInfo(
-        id="epoz",
-        name="ЕПоЗ",
-        url="http://127.0.0.1:8001",
-        description="""
-        Единое положение о закупках Государственной корпорации Ростех.
-        Закупочная деятельность, закупочные процедуры, тендеры, конкурсы,
-        аукционы, запрос предложений, запрос котировок, закупочная документация,
-        договоры, контракты, поставщики, участники закупок, требования к заявкам,
-        планирование закупок, проведение закупок, заключение договоров,
-        исполнение договоров, корпоративные стандарты закупок Ростеха.
+def _short_errors(exc: ValidationError) -> str:
+    return "; ".join(
+        f"{'.'.join(str(p) for p in e['loc']) or '<модель>'}: {e['msg']}"
+        for e in exc.errors())
 
-        Примеры запросов:
-        - Какой способ закупки необходимо выбрать?
-        - Можно ли изменить условия договора после проведения закупки?
-        - Какие требования предъявляются к участникам закупки?
-        - Что сказано в Едином положении о закупках Ростеха?
-        - Каков порядок проведения конкурса?
-        """,
-        contract_forms={"chat_completions", "responses"}
-    ),
 
-    "chat": AgentInfo(
-        id="chat",
-        name="Общий чат",
-        url="http://127.0.0.1:8002",
-        description="""
-        Общение на общие темы.
-        Повседневные вопросы, обсуждение различных тем,
-        помощь в рассуждениях, объяснение понятий,
-        неформальное общение, поддержание диалога,
-        рекомендации, идеи, творчество, образование,
-        программирование, технологии, история, наука,
-        культура, развлечения.
+def build_agent(data: dict) -> AgentInfo:
+    """Собрать агента из словаря, превратив pydantic-ошибку в читаемый текст."""
+    try:
+        return AgentInfo(**data)
+    except ValidationError as e:
+        raise RegistryFileError(_short_errors(e))
 
-        Примеры запросов:
-        - Расскажи интересный факт.
-        - Помоги написать письмо.
-        - Помоги составить заметку на тему.
-        - Помоги придумать идею проекта.
-        - Объясни простыми словами.
-        """,
-        contract_forms={"chat_completions", "responses"}
-    ),
 
-    "ocr": AgentInfo(
-        id="ocr",
-        name="Распознание изображений",
-        url="http://127.0.0.1:8003",
-        description="""
-        Распознание документов.
-        Распознание изображений.
-        Распознание изображений форматов .pdf, .png, .jpg, .jpeg, .tiff, .bmp
-        Распознание отсканированных документов.
+def parse_agents(items) -> dict[str, AgentInfo]:
+    if not isinstance(items, list):
+        raise RegistryFileError("'agents' должен быть списком")
 
-        Примеры запросов:
-        - Что изображено на картинке.
-        - Что находится на изображении.
-        - Распознай текст с изображения.
-        - Извелеки текст из изображения.
-        """,
-        transport="ocr",
-        capabilities={"ocr"},
-        routable=False,
-        enabled=True,
-        contract_forms=set(),
-    ),
+    result: dict[str, AgentInfo] = {}
+    for i, item in enumerate(items):
+        if not isinstance(item, dict):
+            raise RegistryFileError(f"agents[{i}]: ожидается объект")
+        ref = item.get("id") or f"#{i}"
+        try:
+            agent = build_agent(item)
+        except RegistryFileError as e:
+            raise RegistryFileError(f"агент {ref}: {e}")
+        if agent.id in result:
+            raise RegistryFileError(f"дубль id в файле реестра: {agent.id}")
+        result[agent.id] = agent
+    return result
 
-    "tech_rag": AgentInfo(
-        id="tech_rag",
-        name="RAG по технической документации",
-        url="http://127.0.0.1:8004",
-        description="""
-        Ответы на вопросы по технической документации. 
-        Вопросы на темы численного моделирования,
-        численных методов, аэродинамики, математического моделирования,
-        гидродинамики.
-        Вопросы по численным методам.
 
-        Примеры запросов:
-        - Что такое аэродинамика?
-        - Расскажи про метод Рунге-Кутта.
-        - Для чего нужно уравнение Навье-Стокса?
-        - Расскажи про численные методы.
-        """,
-        contract_forms={"chat_completions", "responses"}
-    ),
+def validate_state(agents: dict[str, AgentInfo]) -> None:
+    """Инварианты уровня всего реестра, а не отдельного агента."""
+    fallback = settings.fallback_agent
+    agent = agents.get(fallback)
+    if agent is None:
+        raise RegistryFileError(
+            f"fallback_agent '{fallback}' отсутствует в реестре")
+    if not agent.enabled or not agent.routable:
+        raise RegistryFileError(
+            f"fallback_agent '{fallback}' должен быть enabled и routable")
 
-    "document_chat": AgentInfo(
-        id="document_chat",
-        name="Документы + LLM",
-        url="http://127.0.0.1:8006",
-        description="""
-        Ответы на вопросы по содержимому загруженных документов: PDF,
-        DOCX, изображения. Распознавание документа (OCR) и последующий
-        диалог по его содержимому.
 
-        Примеры запросов:
-        - Извлеки информацию из документа.
-        - Что содержится в документе?
-        - О чём документ? 
-        - Суммаризируй информацию по документу.
-        - Помоги заполнить документ по образцу.
-        """,
-        transport="contract",
-        capabilities={"chat", "attachments"},
-        contract_forms={"chat_completions", "responses"}
-    ),
-}
+def resolve_path() -> Path:
+    path = Path(settings.agents_file)
+    return path if path.is_absolute() else ROOT / path
+
+
+AGENTS_FILE = resolve_path()
+
+_FIELD_ORDER = ("id", "name", "url", "transport", "enabled", "routable",
+                "capabilities", "contract_forms", "config", "description")
+
+
+class _Block(str):
+    """Строка, которую нужно сдампить блочным скаляром `|`."""
+
+
+def _block_representer(dumper, data):
+    return dumper.represent_scalar("tag:yaml.org,2002:str", str(data), style="|")
+
+
+yaml.add_representer(_Block, _block_representer)
+
+
+def _to_item(agent: AgentInfo) -> dict:
+    data = agent.model_dump()
+    data["capabilities"] = sorted(data["capabilities"])
+    data["contract_forms"] = sorted(data["contract_forms"])
+
+    text = "\n".join(line.rstrip() for line in agent.description.splitlines())
+    text = text.strip("\n")
+    data["description"] = _Block(text + "\n") if text else ""
+
+    return {key: data[key] for key in _FIELD_ORDER}
+
+
+def read_file(path: Path | None = None) -> dict[str, AgentInfo]:
+    path = path or AGENTS_FILE
+    try:
+        raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        raise RegistryFileError(f"файл реестра не найден: {path}")
+    except yaml.YAMLError as e:
+        raise RegistryFileError(f"некорректный YAML в {path}: {e}")
+
+    if not isinstance(raw, dict):
+        raise RegistryFileError(
+            f"{path}: ожидается объект с ключами version и agents")
+    if raw.get("version") != FILE_VERSION:
+        raise RegistryFileError(
+            f"{path}: version={raw.get('version')!r}, "
+            f"поддерживается только {FILE_VERSION}")
+
+    return parse_agents(raw.get("agents"))
+
+
+def write_file(agents: dict[str, AgentInfo], path: Path | None = None) -> None:
+    """Атомарная запись: временный файл в той же директории плюс os.replace.
+    Иначе оборванная запись оставит битый реестр, который не переживёт рестарт."""
+    path = path or AGENTS_FILE
+    payload = {"version": FILE_VERSION,
+               "agents": [_to_item(a) for a in agents.values()]}
+    text = yaml.dump(payload, allow_unicode=True, sort_keys=False,
+                     default_flow_style=False, width=100)
+
+    fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix=path.name,
+                               suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(text)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, path)
+    except BaseException:
+        if os.path.exists(tmp):
+            os.unlink(tmp)
+        raise
+
+
+AGENTS: dict[str, AgentInfo] = {}
+AGENTS.update(read_file())
+validate_state(AGENTS)
