@@ -113,6 +113,8 @@ def install_agent_transport() -> dict[str, object]:
             has_files=agent_id == "document_chat",
         )
     apps["ocr"] = fake_agent.make_fake_ocr_agent()
+    if "rag_ingestion" in AGENTS:
+        apps["rag_ingestion"] = fake_agent.make_fake_ingest_agent()
 
     instances: dict[str, object] = {}
 

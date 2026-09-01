@@ -579,3 +579,59 @@ def make_fake_ocr_agent() -> FastAPI:
         return {"text": f"распознанный текст ({len(content)} байт)"}
 
     return app
+
+
+def make_fake_ingest_agent() -> FastAPI:
+    """Минимальный fake ingestion-сервиса. Не имитирует всю платформу
+    RAG-наборов — только показывает, что catch-all мастера доносит запросы
+    до этого url и что X-User-Id прокидывается.
+
+    Всё, что за пределами /v1/platform/rags, — не про мастера: /embed и
+    /v1/internal/* висят на другом порту и напрямую доступны agentic_rag.
+    """
+    app = FastAPI()
+
+    rags: dict[str, dict] = {}
+
+    def require_user(x_user_id: str | None) -> str:
+        if not x_user_id:
+            raise HTTPException(401, "Не передан идентификатор пользователя")
+        return x_user_id
+
+    @app.exception_handler(StarletteHTTPException)
+    async def _http_error(request: Request, exc: StarletteHTTPException):
+        return JSONResponse(status_code=exc.status_code,
+                            content=_error_body(exc.status_code, str(exc.detail)))
+
+    @app.post("/v1/platform/rags", status_code=201)
+    async def create_rag(body: dict = Body(default={}),
+                         x_user_id: str = Header(default=None)):
+        user_id = require_user(x_user_id)
+        rag = {"id": str(uuid4()), "owner_id": user_id,
+               "name": body.get("name") or "test",
+               "created_at": int(time.time())}
+        rags[rag["id"]] = rag
+        return rag
+
+    @app.get("/v1/platform/rags")
+    async def list_rags(x_user_id: str = Header(default=None)):
+        user_id = require_user(x_user_id)
+        return [r for r in rags.values() if r["owner_id"] == user_id]
+
+    @app.get("/v1/platform/rags/{rag_id}")
+    async def get_rag(rag_id: str, x_user_id: str = Header(default=None)):
+        user_id = require_user(x_user_id)
+        rag = rags.get(rag_id)
+        if rag is None or rag["owner_id"] != user_id:
+            raise HTTPException(404, "Набор не найден")
+        return rag
+
+    @app.delete("/v1/platform/rags/{rag_id}", status_code=204)
+    async def delete_rag(rag_id: str, x_user_id: str = Header(default=None)):
+        user_id = require_user(x_user_id)
+        rag = rags.get(rag_id)
+        if rag is None or rag["owner_id"] != user_id:
+            raise HTTPException(404, "Набор не найден")
+        rags.pop(rag_id)
+
+    return app
