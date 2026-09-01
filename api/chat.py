@@ -47,10 +47,11 @@ async def chat_completions(request: Request, user_id: str = Depends(get_user_id)
 
     model, question, has_file = _extract_model_and_question(body)
 
-    agent_id = await resolve_agent(FORM, model, question, has_file)
+    agent_id, forward_model = await resolve_agent(
+        FORM, model, question, has_file)
     check_agent(agent_id)
 
-    forward_body = {**body, "model": agent_id}
+    forward_body = {**body, "model": forward_model}
     payload = json.dumps(forward_body, ensure_ascii=False).encode()
 
     adapter = get_adapter(agent_id)
