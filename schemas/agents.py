@@ -22,6 +22,7 @@ class AgentCreate(BaseModel):
     routable: bool = True
     contract_forms: list[ContractForm] = Field(
         default_factory=lambda: ["chat_completions"])
+    model_prefix: str | None = None
 
 
 class AgentUpdate(BaseModel):
@@ -39,6 +40,7 @@ class AgentUpdate(BaseModel):
     capabilities: list[Capability] | None = None
     routable: bool | None = None
     contract_forms: list[ContractForm] | None = None
+    model_prefix: str | None = None
 
 
 class AgentRead(BaseModel):
@@ -52,6 +54,7 @@ class AgentRead(BaseModel):
     capabilities: list[Capability]
     routable: bool
     contract_forms: list[ContractForm]
+    model_prefix: str | None
 
     @classmethod
     def from_info(cls, agent: AgentInfo) -> "AgentRead":
@@ -66,6 +69,7 @@ class AgentRead(BaseModel):
             capabilities=sorted(agent.capabilities),
             routable=agent.routable,
             contract_forms=sorted(agent.contract_forms),
+            model_prefix=agent.model_prefix,
         )
 
 

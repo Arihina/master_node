@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from typing import AsyncIterator
 
 import httpx
 
@@ -31,16 +32,20 @@ class ContractHTTPAdapter(AgentAdapter):
             ),
         )
 
-    async def proxy(self, method, path, user_id, body=None, content_type=None) -> ProxyResult:
+    async def proxy(
+        self, method: str, path: str, user_id: str,
+        body: bytes | AsyncIterator[bytes] | None = None,
+        content_type: str | None = None,
+    ) -> ProxyResult:
         url = f"{self._base}{path}"
-        headers = {"X-User-Id": user_id}
+        headers = {"X-User-Id": user_id, "Accept-Encoding": "identity"}
         if content_type:
             headers["Content-Type"] = content_type
 
         try:
             cm = self._client.stream(
                 method, url, headers=headers,
-                content=body if body else None,
+                content=body if body is not None else None,
             )
             resp = await cm.__aenter__()
         except httpx.TransportError as e:

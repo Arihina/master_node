@@ -66,9 +66,16 @@ class AgentAdapter(ABC):
     @abstractmethod
     async def proxy(
         self, method: str, path: str, user_id: str,
-        body: bytes | None = None, content_type: str | None = None,
+        body: bytes | AsyncIterator[bytes] | None = None,
+        content_type: str | None = None,
     ) -> ProxyResult:
         """path — с ведущим слэшем, например "/v1/chat/completions/{id}/feedback".
+
+        body — bytes, если мастер уже собрал тело в память (`/v1/chat/completions`
+        и `/v1/responses` парсят JSON, чтобы подменить `model`), либо
+        async-итератор чанков из `request.stream()` для сквозного проброса без
+        буферизации (multipart-загрузки через catch-all). httpx `content=`
+        принимает и то, и другое.
 
         До получения статус-кода апстрима (обрыв соединения, DNS, connect
         refused) — бросает AgentUnavailable, мастер превращает это в 502.
