@@ -14,11 +14,12 @@ from config import settings
 
 Transport = Literal["contract", "external", "ocr"]
 ContractForm = Literal["chat_completions", "responses"]
-Capability = Literal["chat", "ocr", "attachments"]
+Capability = Literal["chat", "ocr", "attachments", "ingest"]
 
 FILE_VERSION = 1
 ROOT = Path(__file__).resolve().parent
 _ID_RE = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
+_MODEL_PREFIX_RE = re.compile(r"^[a-z][a-z0-9_]{0,31}$")
 
 
 class RegistryFileError(Exception):
@@ -49,6 +50,7 @@ class AgentInfo(BaseModel):
     routable: bool = True
     contract_forms: set[ContractForm] = Field(
         default_factory=lambda: {"chat_completions"})
+    model_prefix: str | None = None
 
     @field_validator("id")
     @classmethod
@@ -64,6 +66,20 @@ class AgentInfo(BaseModel):
     @classmethod
     def _strip_url(cls, v: str) -> str:
         return v.strip().rstrip("/")
+
+    @field_validator("model_prefix")
+    @classmethod
+    def _check_model_prefix(cls, v: str | None) -> str | None:
+        """Префикс уходит в неймспейс модели: `<prefix>/<...>` в поле `model`.
+        Слэш внутри префикса запрещён — иначе partition по первому '/' даст
+        не то, что задумано."""
+        if v is None:
+            return None
+        if not _MODEL_PREFIX_RE.match(v):
+            raise ValueError(
+                "допустимы строчная латиница, цифры и подчёркивание, "
+                "первый символ — буква, до 32 символов")
+        return v
 
     @model_validator(mode="after")
     def _check_consistency(self) -> "AgentInfo":
@@ -138,6 +154,17 @@ def validate_state(agents: dict[str, AgentInfo]) -> None:
         raise RegistryFileError(
             f"fallback_agent '{fallback}' должен быть enabled и routable")
 
+    owners: dict[str, str] = {}
+    for agent_id, a in agents.items():
+        if a.model_prefix is None:
+            continue
+        existing = owners.get(a.model_prefix)
+        if existing is not None:
+            raise RegistryFileError(
+                f"model_prefix '{a.model_prefix}' занят и агентом '{existing}', "
+                f"и агентом '{agent_id}' — префикс должен быть уникален")
+        owners[a.model_prefix] = agent_id
+
 
 def resolve_path() -> Path:
     path = Path(settings.agents_file)
@@ -147,7 +174,8 @@ def resolve_path() -> Path:
 AGENTS_FILE = resolve_path()
 
 _FIELD_ORDER = ("id", "name", "url", "transport", "enabled", "routable",
-                "capabilities", "contract_forms", "config", "description")
+                "capabilities", "contract_forms", "model_prefix", "config",
+                "description")
 
 
 class _Block(str):
@@ -170,7 +198,8 @@ def _to_item(agent: AgentInfo) -> dict:
     text = text.strip("\n")
     data["description"] = _Block(text + "\n") if text else ""
 
-    return {key: data[key] for key in _FIELD_ORDER}
+    return {key: data[key] for key in _FIELD_ORDER
+            if not (key == "model_prefix" and data[key] is None)}
 
 
 def read_file(path: Path | None = None) -> dict[str, AgentInfo]:
