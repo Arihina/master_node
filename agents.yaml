@@ -122,3 +122,21 @@ agents:
     - О чём документ?
     - Суммаризируй информацию по документу.
     - Помоги заполнить документ по образцу.
+- id: rag_ingestion
+  name: Управление RAG-наборами
+  url: http://127.0.0.1:8011
+  transport: contract
+  enabled: true
+  routable: false
+  capabilities:
+  - ingest
+  contract_forms: []
+  config: {}
+  description: |
+    Управление пользовательскими RAG-наборами: создание, правка конфига,
+    загрузка документов, импорт архивами, удаление. Не участвует ни в
+    автороутинге (routable=false), ни в списке моделей (contract_forms
+    пустые); мастер работает с ним только через сквозной проброс
+    /agents/rag_ingestion/v1/platform/rags/... Внутренние ручки (/embed,
+    /v1/internal/*) висят на отдельном порту 8012 и в мастер не заявлены —
+    туда ходит agentic_rag напрямую.
