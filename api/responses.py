@@ -12,6 +12,9 @@ from api.content import (
 from api.deps import check_agent, proxy_response
 from api.resolve import resolve_agent
 
+from registry import AGENTS
+
+
 router = APIRouter(tags=["responses"])
 
 FORM = "responses"
@@ -61,7 +64,15 @@ async def responses(request: Request, user_id: str = Depends(get_user_id)):
         FORM, model, question, has_file)
     check_agent(agent_id)
 
-    forward_body = {**body, "model": forward_model}
+    agent_info = AGENTS[agent_id]
+    prefix, sep, _ = model.partition("/")
+    if (agent_info.model_prefix
+            and sep
+            and prefix == agent_info.model_prefix):
+        forward_body = body
+    else:
+        forward_body = {**body, "model": agent_id}
+
     payload = json.dumps(forward_body, ensure_ascii=False).encode()
 
     adapter = get_adapter(agent_id)
