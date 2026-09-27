@@ -21,9 +21,12 @@ async def _agent_passthrough(
     content_type = request.headers.get("content-type")
     body = request.stream() if request.method in _METHODS_WITH_BODY else None
 
+    qs = request.url.query
+    forwarded_path = f"/{path}" + (f"?{qs}" if qs else "")
+
     adapter = get_adapter(agent_id)
     return await proxy_response(
-        adapter.proxy(request.method, f"/{path}",
+        adapter.proxy(request.method, forwarded_path,
                       user_id, body, content_type)
     )
 
