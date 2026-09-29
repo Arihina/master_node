@@ -100,7 +100,7 @@ agents:
     - Расскажи про численные методы.
 - id: document_chat
   name: Документы + LLM
-  url: http://127.0.0.1:8006
+  url: http://127.0.0.1:8007
   transport: contract
   enabled: true
   routable: true
