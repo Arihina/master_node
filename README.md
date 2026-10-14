@@ -603,6 +603,7 @@ FALLBACK_AGENT=chat
 AGENTS_FILE=agents.yaml
 
 # --- models ---
+OLLAMA_HOST=http://localhost:11434
 OLLAMA_MODEL=gemma2:2b
 EMBEDD_MODEL=intfloat/multilingual-e5-small
 ```
@@ -626,6 +627,7 @@ FALLBACK_AGENT=chat
 AGENTS_FILE=agents.yaml
 
 # --- models ---
+OLLAMA_HOST=http://localhost:11434
 OLLAMA_MODEL=qwen3.6:35b
 EMBEDD_MODEL=BAAI/bge-m3
 ```

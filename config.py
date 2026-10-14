@@ -22,6 +22,7 @@ class Settings(BaseSettings):
     agents_file: str = "agents.yaml"
 
     ollama_model: str
+    ollama_host: str = "http://localhost:11434"
     embedd_model: str
 
 

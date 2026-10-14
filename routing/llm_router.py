@@ -6,7 +6,7 @@ from registry import AGENTS
 
 from config import settings
 
-client = Client(host="http://localhost:11434")
+client = Client(host=settings.ollama_host)
 
 
 def route(
