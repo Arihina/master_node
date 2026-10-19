@@ -29,11 +29,19 @@ class MasterRouter:
         if result["decision"] == "direct":
             return result["agent"]
 
+        if result["decision"] == "no_match":
+            return self._fallback(candidates)
+
         try:
             if result["decision"] == "ambiguous":
-                agent = await asyncio.to_thread(llm_router.route, message, result["candidates"])
+                agent = await asyncio.wait_for(
+                    asyncio.to_thread(llm_router.route, message,
+                                      result["candidates"]),
+                    timeout=settings.router_llm_timeout)
             else:
-                agent = await asyncio.to_thread(llm_router.route, message, candidates)
+                agent = await asyncio.wait_for(
+                    asyncio.to_thread(llm_router.route, message, candidates),
+                    timeout=settings.router_llm_timeout)
         except Exception:
             agent = None
 

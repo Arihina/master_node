@@ -6,7 +6,8 @@ from registry import AGENTS
 
 from config import settings
 
-client = Client(host=settings.ollama_host)
+client = Client(host=settings.ollama_host,
+                timeout=settings.router_llm_timeout)
 
 
 def route(
@@ -28,7 +29,7 @@ def route(
     )
 
     prompt = f"""
-    Ты роутер запросов.
+    Ты роутер запросов. Выбери агента из списка ниже или ответь null.
 
     Доступные агенты:
 
@@ -37,6 +38,8 @@ def route(
     Верни только JSON без пояснений и markdown:
 
     {{"agent":"agent_id"}}
+
+    Если ни один из агентов не подходит для запроса, верни {{"agent": null}}.
 
     Запрос:
 
@@ -53,4 +56,6 @@ def route(
 
     valid_ids = {a.id for a in available_agents}
 
+    # null (или любой другой мусор) не проходит валидацию — наверх уходит
+    # None, и каскад уходит в fallback-агента.
     return agent if agent in valid_ids else None

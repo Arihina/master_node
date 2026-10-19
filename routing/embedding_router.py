@@ -8,8 +8,10 @@ model = SentenceTransformer(
     local_files_only=True
 )
 
-THRESHOLD = 0.69
-AMBIGUITY_DELTA = 0.04
+
+THRESHOLD = settings.routing_threshold
+AMBIGUITY_DELTA = settings.routing_ambiguity_delta
+LOW_THRESHOLD = settings.routing_low_threshold
 
 
 class EmbeddingIndex:
@@ -56,6 +58,12 @@ class EmbeddingIndex:
             second_agent, second_score = None, 0.0
 
         gap = best_score - second_score
+
+        if best_score < LOW_THRESHOLD:
+            return {
+                "decision": "no_match",
+                "scores": scores,
+            }
 
         if best_score < THRESHOLD:
             return {
