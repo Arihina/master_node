@@ -177,10 +177,14 @@ class AgentRegistry:
 
     def _apply(self, new_state: dict[str, AgentInfo], diff: Diff,
                vectors: dict) -> Applied:
+        new_vectors = index.snapshot()
+
         for agent_id in diff.removed + diff.embeddings_cleared:
-            index.remove(agent_id)
+            new_vectors.pop(agent_id, None)
+            
         for agent_id, vector in vectors.items():
-            index.upsert(agent_id, vector)
+            new_vectors[agent_id] = vector
+        index.replace(new_vectors)
 
         for agent_id in diff.adapters:
             adapter = factory.invalidate(agent_id)

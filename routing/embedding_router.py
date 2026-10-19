@@ -29,6 +29,19 @@ class EmbeddingIndex:
     def remove(self, agent_id: str) -> None:
         self._vectors.pop(agent_id, None)
 
+    def snapshot(self) -> dict:
+        """Копия текущего набора векторов — база для copy-on-write подмены."""
+        return dict(self._vectors)
+
+    def replace(self, vectors: dict) -> None:
+        """Атомарная подмена индекса целиком: замена ссылки, а не мутация
+        по ключам. Старый словарь после этого не меняется, поэтому
+        параллельный route() видит либо старый, либо новый набор векторов
+        целиком — никогда промежуточное состояние. Вызывается из
+        registry_service._apply; upsert/remove остались только для
+        стартового наполнения индекса."""
+        self._vectors = vectors
+
     def ids(self) -> set[str]:
         return set(self._vectors)
 

@@ -23,6 +23,7 @@ stubs.install_dependency_stubs()
 
 from registry import AGENTS  # noqa: E402
 from routing.router_service import MasterRouter, NoRoutableAgent  # noqa: E402
+from routing.embedding_router import EmbeddingIndex  # noqa: E402
 
 ALL_ROUTABLE = {a.id for a in AGENTS.values() if a.enabled and a.routable}
 
@@ -223,6 +224,62 @@ class RegistryConsistencyTests(unittest.TestCase):
                 self.assertTrue(
                     agent.contract_forms <= known,
                     f"неизвестная форма у {agent.id}: {agent.contract_forms - known}")
+
+
+class EmbeddingIndexAtomicityTests(unittest.TestCase):
+    """Copy-on-write подмена индекса: читатель видит либо старый, либо новый
+    набор векторов целиком — никогда смесь. Именно на это завязан
+    registry_service._apply при обновлении реестра."""
+
+    def test_replace_swaps_whole_snapshot(self):
+        index = EmbeddingIndex(encoder=None)
+        index.replace({"a": 1.0, "b": 2.0})
+
+        old = index.snapshot()
+        index.replace({"a": 3.0, "b": 2.0, "c": 4.0})
+
+        self.assertEqual(index.ids(), {"a", "b", "c"})
+        self.assertEqual(old, {"a": 1.0, "b": 2.0},
+                         "старый снапшот не должен меняться после replace")
+
+    def test_concurrent_readers_see_only_whole_states(self):
+        import threading
+        import time
+
+        index = EmbeddingIndex(encoder=None)
+        state_a = {"a": 1.0, "b": 2.0}
+        state_b = {"a": 3.0, "b": 4.0, "c": 5.0}
+        index.replace(dict(state_a))
+
+        seen = set()
+        stop = threading.Event()
+
+        def reader():
+            while not stop.is_set():
+                seen.add(tuple(sorted(index.snapshot().items())))
+
+        thread = threading.Thread(target=reader)
+        thread.start()
+        try:
+            # писатель чередует состояния, пока читатель не увидит оба
+            deadline = time.monotonic() + 5
+            while len(seen) < 2 and time.monotonic() < deadline:
+                index.replace(dict(state_a))
+                index.replace(dict(state_b))
+                time.sleep(0)
+        finally:
+            stop.set()
+            thread.join()
+
+        allowed = {tuple(sorted(state_a.items())),
+                   tuple(sorted(state_b.items()))}
+        self.assertTrue(
+            seen <= allowed,
+            f"читатель увидел состояние-смесь: {seen - allowed}")
+        self.assertEqual(
+            len(seen), 2,
+            f"за 5 с читатель увидел только {sorted(seen)} — "
+            "либо планировщик зажал поток, либо replace не доходит до читателя")
 
 
 if __name__ == "__main__":
