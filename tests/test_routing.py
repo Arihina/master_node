@@ -95,6 +95,46 @@ class RouterCandidateTests(unittest.TestCase):
         self.assertEqual(
             agent, "chat", "при отказе LLM должен сработать fallback")
 
+    def test_no_match_skips_llm(self):
+        """Запрос вне тематик всех агентов: LLM-слой не вызывается вовсе,
+        сразу fallback."""
+        with mock.patch("routing.embedding_router.route",
+                        return_value={"decision": "no_match", "scores": []}), \
+                mock.patch("routing.llm_router.route") as llm:
+            agent = run(self.router.route(
+                "как починить стиральную машину", allowed={"epoz", "chat"}))
+
+        llm.assert_not_called()
+        self.assertEqual(agent, "chat")
+
+    def test_llm_null_answer_falls_back(self):
+        """LLM вправе ответить {"agent": null} — каскад уходит в fallback."""
+        with mock.patch("routing.embedding_router.route",
+                        return_value={"decision": "unclear"}), \
+                mock.patch("routing.llm_router.route", return_value=None):
+            agent = run(self.router.route("текст", allowed={"epoz", "chat"}))
+
+        self.assertEqual(agent, "chat")
+
+    def test_slow_llm_times_out(self):
+        """Зависший вызов Ollama не может держать запрос бесконечно:
+        срабатывает asyncio.wait_for."""
+        import time
+
+        from config import settings
+
+        def slow(*a, **k):
+            time.sleep(0.5)
+            return "chat"
+
+        with mock.patch("routing.embedding_router.route",
+                        return_value={"decision": "unclear"}), \
+                mock.patch("routing.llm_router.route", side_effect=slow), \
+                mock.patch.object(settings, "router_llm_timeout", 0.05):
+            agent = run(self.router.route("текст", allowed={"epoz", "chat"}))
+
+        self.assertEqual(agent, "chat", "по таймауту должен сработать fallback")
+
     def test_empty_candidate_set_raises(self):
         with self.assertRaises(NoRoutableAgent):
             run(self.router.route("текст", allowed=set()))
