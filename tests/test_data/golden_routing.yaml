@@ -1,0 +1,183 @@
+# Золотые пары (запрос -> агент) для оценки семантического роутинга model="auto".
+#
+# Собраны под ТЕКУЩИЙ реестр agents.yaml: routable-агенты epoz, chat,
+# tech_rag, document_chat. Историческая основа — tests_curl/test_data/
+# embedding_test_queries.md (скоры оттуда неактуальны: сняты на
+# multilingual-e5-small для реестра epoz/cfd/lawyer/chat).
+#
+# Эталон — EMBEDD_MODEL=BAAI/bge-m3 (единственная используемая модель).
+# cfd-кейсы перенаправлены на tech_rag; tech_rag покрывает не только CFD —
+# добавились кейсы по численным методам, аэродинамике, гидродинамике и
+# математическому моделированию (темы из его описания).
+#
+# Кейсы с note — граничные/рискованные: полезно следить, куда они уходят.
+# expected: null допустимо (агент исчез из реестра) — такие кейсы в accuracy
+# не идут, но печатаются отдельно.
+version: 1
+cases:
+  # --- ЕПоЗ (10) ---
+  - id: epoz_01
+    query: Что такое меры ограничительного характера в закупочной деятельности?
+    expected: epoz
+  - id: epoz_02
+    query: Что говорит Единое положение о закупках Ростеха о запросе предложений?
+    expected: epoz
+  - id: epoz_03
+    query: Можно ли изменить условия договора после завершения закупочной процедуры?
+    expected: epoz
+  - id: epoz_04
+    query: Какие требования предъявляются к участникам закупки?
+    expected: epoz
+  - id: epoz_05
+    query: Как проводится конкурс в соответствии с ЕПоЗ?
+    expected: epoz
+  - id: epoz_06
+    query: Когда допускается закупка у единственного поставщика?
+    expected: epoz
+  - id: epoz_07
+    query: Как оформить закупочную документацию?
+    expected: epoz
+    note: риск ложного ухода в document_chat из-за слова "документация"
+  - id: epoz_08
+    query: Какие этапы включает процедура закупки?
+    expected: epoz
+  - id: epoz_09
+    query: Можно ли отклонить заявку участника?
+    expected: epoz
+  - id: epoz_10
+    query: Каков порядок заключения договора по результатам закупки?
+    expected: epoz
+
+  # --- tech_rag: CFD (10) ---
+  - id: cfd_01
+    query: Что такое число Рейнольдса?
+    expected: tech_rag
+  - id: cfd_02
+    query: Как выбрать модель турбулентности для внешнего обтекания?
+    expected: tech_rag
+  - id: cfd_03
+    query: Почему расчет в Fluent не сходится?
+    expected: tech_rag
+    note: на старом эмбеддере ошибался в пользу chat
+  - id: cfd_04
+    query: Как задать граничные условия на входе потока?
+    expected: tech_rag
+  - id: cfd_05
+    query: В чем отличие k-epsilon и k-omega SST?
+    expected: tech_rag
+    note: на старом эмбеддере ошибался в пользу chat
+  - id: cfd_06
+    query: Как рассчитать коэффициент аэродинамического сопротивления?
+    expected: tech_rag
+  - id: cfd_07
+    query: Что такое конечно-объемный метод?
+    expected: tech_rag
+  - id: cfd_08
+    query: Как построить качественную расчетную сетку?
+    expected: tech_rag
+  - id: cfd_09
+    query: Как смоделировать теплообмен в трубе?
+    expected: tech_rag
+  - id: cfd_10
+    query: Что означает residual в CFD расчете?
+    expected: tech_rag
+
+  # --- tech_rag: численные методы / аэродинамика / гидродинамика (8) ---
+  - id: tech_01
+    query: Что такое аэродинамика?
+    expected: tech_rag
+  - id: tech_02
+    query: Расскажи про метод Рунге-Кутта.
+    expected: tech_rag
+  - id: tech_03
+    query: Для чего нужно уравнение Навье-Стокса?
+    expected: tech_rag
+  - id: tech_04
+    query: Расскажи про численные методы.
+    expected: tech_rag
+  - id: tech_05
+    query: Чем отличаются явные и неявные схемы численного интегрирования?
+    expected: tech_rag
+  - id: tech_06
+    query: Что такое метод конечных элементов?
+    expected: tech_rag
+  - id: tech_07
+    query: Что такое число Маха?
+    expected: tech_rag
+  - id: tech_08
+    query: Как решить дифференциальное уравнение численно?
+    expected: tech_rag
+
+  # --- Общий чат (9) ---
+  - id: chat_01
+    query: Расскажи интересный факт про космос.
+    expected: chat
+  - id: chat_02
+    query: Как выучить Python с нуля?
+    expected: chat
+  - id: chat_03
+    query: Придумай идею стартапа.
+    expected: chat
+  - id: chat_04
+    query: Объясни квантовую физику простыми словами.
+    expected: chat
+    note: на старом эмбеддере ошибался в пользу cfd
+  - id: chat_05
+    query: "Напиши статью на тему: проблемы современного общества."
+    expected: chat
+    note: на старом эмбеддере ошибался в пользу lawyer
+  - id: chat_06
+    query: Как развить критическое мышление?
+    expected: chat
+  - id: chat_07
+    query: Как повысить эффективность труда?
+    expected: chat
+  - id: chat_08
+    query: Посоветуй книгу для чтения на выходных.
+    expected: chat
+  - id: chat_09
+    query: Напиши реферат на тему аэродинамики.
+    expected: chat
+    note: "граничный: тема tech_rag, но задача «написать текст» — за chat"
+
+  # --- document_chat (8) ---
+  - id: doc_01
+    query: Извлеки информацию из документа.
+    expected: document_chat
+  - id: doc_02
+    query: Что содержится в документе?
+    expected: document_chat
+  - id: doc_03
+    query: О чём этот документ?
+    expected: document_chat
+  - id: doc_04
+    query: Суммаризируй информацию по документу.
+    expected: document_chat
+  - id: doc_05
+    query: Помоги заполнить документ по образцу.
+    expected: document_chat
+  - id: doc_06
+    query: Прочитай PDF и ответь на вопросы по нему.
+    expected: document_chat
+  - id: doc_07
+    query: Распознай текст со скана документа.
+    expected: document_chat
+  - id: doc_08
+    query: Ответь на вопросы по загруженному файлу.
+    expected: document_chat
+
+  # --- Граничные между агентами (3) ---
+  - id: edge_02
+    query: Какая ответственность предусмотрена за нарушение закупочных процедур?
+    expected: epoz
+  - id: edge_03
+    query: Как рассчитать давление в трубопроводе?
+    expected: tech_rag
+  - id: edge_04
+    query: Помоги написать договор на поставку оборудования.
+    expected: epoz
+    note: закупочный договор ближе всего к ЕПоЗ; раньше каскад уводил его в lawyer
+  - id: edge_05
+    query: Какие документы нужны для участия в тендере?
+    expected: epoz
+    note: граничный с document_chat из-за слова "документы"
