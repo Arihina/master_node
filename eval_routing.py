@@ -35,6 +35,7 @@ import argparse
 import sys
 from pathlib import Path
 
+import numpy as np
 import yaml
 
 from config import settings
@@ -76,16 +77,23 @@ def encode_passages(descriptions: list[str], prefix: bool):
 
 
 def build_index(pool: dict[str, object], prefix: bool):
-    """Векторы описаний только для переданных кандидатов."""
-    ids = list(pool)
-    vectors = encode_passages(
-        [pool[aid].description_key for aid in ids], prefix)
-    return {aid: vectors[i] for i, aid in enumerate(ids)}
+    """Векторы пассажей описаний только для переданных кандидатов.
+    Значение — матрица (n_пассажей, dim): близость = максимум по пассажам
+    (multi-vector, как в продовом EmbeddingIndex)."""
+    return {aid: encode_passages(pool[aid].passage_texts, prefix)
+            for aid in pool}
+
+
+def _max_score(query_vec, vecs) -> float:
+    arr = np.asarray(vecs)
+    if arr.ndim == 1:
+        return float(query_vec @ arr)
+    return float((query_vec @ arr.T).max())
 
 
 def route(query_vec, vectors, threshold, delta, low):
     scores = sorted(
-        ((aid, float(query_vec @ vec)) for aid, vec in vectors.items()),
+        ((aid, _max_score(query_vec, vecs)) for aid, vecs in vectors.items()),
         key=lambda kv: kv[1], reverse=True)
     top1, top1_score = scores[0]
     top2_score = scores[1][1] if len(scores) > 1 else 0.0
@@ -109,17 +117,21 @@ def fallback_agent(pool: dict[str, object]) -> str:
 
 def cascade_with_llm(query, decision, top1, scores, pool):
     """Повторяет MasterRouter: direct берём сразу, no_match — сразу fallback
-    без LLM, иначе спрашиваем LLM (для ambiguous — шорт-лист из двух лидеров,
-    для fallback — все кандидаты), валидируем ответ множеством кандидатов,
-    иначе — fallback."""
+    без LLM. Ambiguous — все лидеры в пределах дельты, fallback — top-k по
+    близости (ROUTING_LLM_SHORTLIST); ответ LLM валидируется множеством
+    кандидатов, иначе — fallback."""
     from routing import llm_router
 
     if decision == "direct":
         return top1
     if decision == "no_match":
         return fallback_agent(pool)
-    shortlist = ([top1, scores[1][0]] if decision == "ambiguous"
-                 and len(scores) > 1 else [a for a, _ in scores])
+    if decision == "ambiguous" and scores:
+        best_score = scores[0][1]
+        shortlist = [aid for aid, score in scores
+                     if best_score - score <= DELTA]
+    else:
+        shortlist = [aid for aid, _ in scores[:settings.routing_llm_shortlist]]
     try:
         agent = llm_router.route(query, shortlist)
     except Exception as e:

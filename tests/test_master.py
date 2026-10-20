@@ -153,18 +153,19 @@ class SemanticRoutingTests(MasterTestCase):
 
 class ContractFormTests(MasterTestCase):
     """Форма проверяется симметрично: агент без формы получает 400, а не
-    подмену на другую форму."""
+    подмену на другую форму. rag_ingestion не заявляет ни одной формы."""
 
-    def test_ocr_rejected_in_responses(self):
-        response = self.responses({"model": "ocr", "input": "привет"})
+    def test_formless_agent_rejected_in_responses(self):
+        response = self.responses({"model": "rag_ingestion", "input": "привет"})
         error = self.assertOpenAIError(response, 400, "invalid_request_error")
-        self.assertIn("ocr", error["message"])
+        self.assertIn("rag_ingestion", error["message"])
 
-    def test_ocr_rejected_in_chat_completions(self):
+    def test_formless_agent_rejected_in_chat_completions(self):
         response = self.chat({
-            "model": "ocr",
+            "model": "rag_ingestion",
             "messages": [{"role": "user", "content": "привет"}]})
-        self.assertOpenAIError(response, 400, "invalid_request_error")
+        error = self.assertOpenAIError(response, 400, "invalid_request_error")
+        self.assertIn("rag_ingestion", error["message"])
 
     def test_all_dialogue_agents_support_both_forms(self):
         for agent_id in DIALOGUE_AGENTS:
