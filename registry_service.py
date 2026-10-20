@@ -77,7 +77,7 @@ class AgentRegistry:
         self._lock = asyncio.Lock()
         self._closing: set[asyncio.Task] = set()
 
-    # --- чтение ---------------------------------------------------------
+    # чтение
 
     def get(self, agent_id: str) -> AgentInfo:
         agent = AGENTS.get(agent_id)
@@ -102,7 +102,7 @@ class AgentRegistry:
             "fallback_agent": settings.fallback_agent,
         }
 
-    # --- запись ---------------------------------------------------------
+    # запись
 
     async def create(self, spec: AgentCreate) -> tuple[AgentInfo, Applied]:
         async with self._lock:
@@ -146,7 +146,7 @@ class AgentRegistry:
                 raise RegistryValidationError(str(e))
             return await self._commit(new_state, write=False)
 
-    # --- внутреннее -----------------------------------------------------
+    # внутреннее
 
     @staticmethod
     def _build(data: dict) -> AgentInfo:
@@ -166,9 +166,8 @@ class AgentRegistry:
 
         vectors = {}
         for agent_id in diff.embeddings:
-            text = new_state[agent_id].description_key
-            vectors[agent_id] = await run_in_threadpool(index.encode_passage,
-                                                        text)
+            vectors[agent_id] = await run_in_threadpool(
+                index.encode_passages, new_state[agent_id].passage_texts)
 
         if write:
             await run_in_threadpool(registry.write_file, new_state)
