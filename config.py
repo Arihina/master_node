@@ -35,6 +35,10 @@ class Settings(BaseSettings):
 
     router_llm_timeout: float = 5.0
 
+    router_llm_max_query_chars: int = 1000
+
+    routing_cache_size: int = 256
+
     agents_file: str = "agents.yaml"
 
     ollama_model: str
