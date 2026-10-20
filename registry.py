@@ -102,6 +102,34 @@ class AgentInfo(BaseModel):
         return normalize_description(self.description)
 
     @property
+    def passage_texts(self) -> list[str]:
+        """Текст(ы) описания для эмбеддинг-индекса.
+
+        Измерено на золотом наборе (eval_routing.py, BAAI/bge-m3): блок
+        «Примеры запросов» вредит эмбеддинг-слою — примеры агентов-универсалов
+        (chat) перетягивают на себя тематические запросы. Top-1 точность:
+        полное описание 91.8%, только проза 93.9%, max по прозе+примерам
+        81.6%. Поэтому в индекс идёт только проза (список тем); примеры
+        остаются в description для LLM-роутера, который читает его целиком.
+
+        Возвращается список ради multi-vector индекса: сейчас это один пассаж,
+        но интерфейс позволяет добавить другие (например, keywords) без
+        переделки индекса.
+        """
+        prose_lines: list[str] = []
+        for raw in self.description.splitlines():
+            line = raw.strip()
+            if not line:
+                continue
+            if line in ("Примеры запросов:", "Примеры запросов") \
+                    or line.startswith("Примеры запросов"):
+                break
+            prose_lines.append(line)
+
+        prose = normalize_description(" ".join(prose_lines))
+        return [prose] if prose else []
+
+    @property
     def adapter_key(self) -> tuple:
         """Поля, при смене которых адаптер надо пересоздать. Правка description
         адаптер не трогает — иначе на каждом редактировании текста пересоздаётся
