@@ -21,10 +21,10 @@ class Settings(BaseSettings):
 
     # Пороги эмбеддинг-слоя авто-роутинга. Зависят от EMBEDD_MODEL и
     # калибруются прогоном eval_routing.py на tests/test_data/golden_routing.yaml.
-    # Рекомендованные значения для BAAI/bge-m3 (текущая модель) — 0.40/0.04:
-    # ~82% запросов решаются сразу (точность direct ~98%), остальное
-    # доигрывает LLM-слой. Прежние 0.69/0.04 были подобраны под
-    # intfloat/multilingual-e5-small.
+    # Рекомендованные значения для BAAI/bge-m3 (текущая модель) — 0.30/0.40/0.04:
+    # ~63% запросов решаются сразу (точность direct ~97%), ~29% уходят в
+    # LLM-слой как ambiguous, остальное — fallback. Прежние 0.69/0.04 были
+    # подобраны под intfloat/multilingual-e5-small.
     routing_threshold: float = 0.40
     routing_ambiguity_delta: float = 0.04
     # Нижний порог: ниже него запрос считается вне тематик всех агентов —
