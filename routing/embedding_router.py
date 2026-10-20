@@ -92,15 +92,19 @@ class EmbeddingIndex:
             }
 
         if best_score < THRESHOLD:
+            shortlist = [agent_id for agent_id, _ in
+                         scores[:settings.routing_llm_shortlist]]
             return {
                 "decision": "fallback",
+                "candidates": shortlist,
                 "scores": scores,
             }
 
         if gap <= AMBIGUITY_DELTA:
             return {
                 "decision": "ambiguous",
-                "candidates": [best_agent, second_agent],
+                "candidates": [agent_id for agent_id, score in scores
+                               if best_score - score <= AMBIGUITY_DELTA],
                 "scores": scores,
                 "gap": gap,
             }

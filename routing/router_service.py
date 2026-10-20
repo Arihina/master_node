@@ -39,8 +39,9 @@ class MasterRouter:
                                       result["candidates"]),
                     timeout=settings.router_llm_timeout)
             else:
+                shortlist = result.get("candidates") or candidates
                 agent = await asyncio.wait_for(
-                    asyncio.to_thread(llm_router.route, message, candidates),
+                    asyncio.to_thread(llm_router.route, message, shortlist),
                     timeout=settings.router_llm_timeout)
         except Exception:
             agent = None

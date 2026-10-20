@@ -31,6 +31,8 @@ class Settings(BaseSettings):
     # LLM-слой не вызывается, сразу fallback-агент. Откалиброван под bge-m3.
     routing_low_threshold: float = 0.30
 
+    routing_llm_shortlist: int = 3
+
     router_llm_timeout: float = 5.0
 
     agents_file: str = "agents.yaml"
