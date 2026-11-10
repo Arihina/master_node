@@ -54,9 +54,16 @@
 мог быть выбран по семантическому совпадению, просто падая дальше в
 `CapabilityNotSupported`. Сейчас исключён на первом же шаге.
 
-Дальше — каскад из двух слоёв, каждый следующий запускается только если
+Дальше — каскад из трёх слоёв, каждый следующий запускается только если
 предыдущий не дал ответа:
 
+0. **rule_router** — словарь маршрутизации (`ROUTING_VOCAB_FILE`, формат
+   `routing_vocab.json`): взвешенная сумма совпавших терминов домена. Если
+   сумма >= порога из файла — запрос уверенно относится к целевому агенту
+   (`ROUTING_VOCAB_AGENT_ID`, по умолчанию `epoz`), и каскад возвращает его
+   сразу, без эмбеддингов и LLM. Совпадение: у аббревиатур — по границам
+   слова, у остальных терминов — подстрока (ловит падежи). Пустой путь
+   выключает слой.
 1. **embedding_router** — семантическая близость запроса к описаниям агентов
    через модель из `EMBEDD_MODEL` (косинусная мера, пороги
    `ROUTING_LOW_THRESHOLD`/`ROUTING_THRESHOLD`/`ROUTING_AMBIGUITY_DELTA` из
@@ -151,6 +158,7 @@ venv/bin/python eval_routing.py --only epoz  # фильтр по id/тексту
 `ROUTING_THRESHOLD` и `ROUTING_AMBIGUITY_DELTA` (`.env`), плюс
 `ROUTING_LLM_SHORTLIST` (размер шорт-листа для LLM при fallback),
 `ROUTING_CACHE_SIZE` (LRU-кэш решений),
+`ROUTING_VOCAB_FILE`/`ROUTING_VOCAB_AGENT_ID` (словарь-правило),
 `ROUTER_LLM_TIMEOUT` и `ROUTER_LLM_MAX_QUERY_CHARS` для вызовов Ollama.
 Они зависят от модели эмбеддингов и
 подбираются этим скриптом, а не «на глаз» — прежние 0.69/0.04 были
@@ -675,6 +683,9 @@ ROUTER_LLM_TIMEOUT=5.0
 ROUTER_LLM_MAX_QUERY_CHARS=1000
 # размер LRU-кэша решений авто-роутинга
 ROUTING_CACHE_SIZE=256
+# словарь-правило маршрутизации (опционально; пусто = выключен)
+#ROUTING_VOCAB_FILE=routing_vocab.json
+#ROUTING_VOCAB_AGENT_ID=epoz
 
 # --- реестр ---
 AGENTS_FILE=agents.yaml
@@ -711,6 +722,9 @@ ROUTER_LLM_TIMEOUT=5.0
 ROUTER_LLM_MAX_QUERY_CHARS=1000
 # размер LRU-кэша решений авто-роутинга
 ROUTING_CACHE_SIZE=256
+# словарь-правило маршрутизации (опционально; пусто = выключен)
+#ROUTING_VOCAB_FILE=routing_vocab.json
+#ROUTING_VOCAB_AGENT_ID=epoz
 
 # --- реестр ---
 AGENTS_FILE=agents.yaml
