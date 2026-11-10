@@ -39,6 +39,12 @@ class Settings(BaseSettings):
 
     routing_cache_size: int = 256
 
+    # Слой правил: словарь маршрутизации (routing_vocab.json) — взвешенные
+    # термины домена закупок. Относительный путь резолвится от корня проекта
+    # (как agents_file). Пустой путь выключает слой.
+    routing_vocab_file: str = ""
+    routing_vocab_agent_id: str = "epoz"
+
     agents_file: str = "agents.yaml"
 
     ollama_model: str

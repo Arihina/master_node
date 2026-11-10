@@ -1,7 +1,7 @@
 import asyncio
 from collections import OrderedDict
 
-from routing import embedding_router, llm_router
+from routing import embedding_router, llm_router, rule_router
 from registry import AGENTS
 from registry_service import agent_registry
 from config import settings
@@ -66,6 +66,11 @@ class MasterRouter:
         cached = _cache.get(key)
         if cached is not None:
             return cached
+
+        rule_agent = rule_router.route(message, candidates)
+        if rule_agent is not None:
+            _cache.put(key, rule_agent)
+            return rule_agent
 
         chosen = await self._route_uncached(message, candidates)
         _cache.put(key, chosen)
