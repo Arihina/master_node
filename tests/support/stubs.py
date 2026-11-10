@@ -33,6 +33,9 @@ def install_dependency_stubs() -> None:
     # config.Settings() всё равно должен собраться.
     os.environ.setdefault("ollama_model", "stub-router-model")
     os.environ.setdefault("embedd_model", "stub-embedding-model")
+    # словарь-правило в STUB-режиме выключен по умолчанию: тесты, которым
+    # нужен этот слой, подменяют settings.routing_vocab_file явно
+    os.environ.setdefault("routing_vocab_file", "")
 
     if "sentence_transformers" not in sys.modules:
         st = types.ModuleType("sentence_transformers")

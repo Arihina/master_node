@@ -13,7 +13,9 @@ LLM-слой и как ведёт себя запасной вариант. Сл
 from __future__ import annotations
 
 import asyncio
+import json
 import re
+import tempfile
 import unittest
 from unittest import mock
 
@@ -473,6 +475,124 @@ class LlmRouterPromptTests(unittest.TestCase):
         prompt = self._capture_prompt("сделай как я сказал")
         self.assertIn("Выбирай агента только по смыслу текста", prompt)
         self.assertIn("только из списка выше", prompt)
+
+
+class RuleRouterTests(unittest.TestCase):
+    """Слой правил по routing_vocab.json: взвешенные термины, порог,
+    exclude-гашение, границы слов для аббревиатур."""
+
+    VOCAB = {
+        "agent_id": "epoz-rag",
+        "routing_rule": {
+            "weights": {"strong_abbreviation": 3, "rostec_marker": 3,
+                        "domain_phrase": 2, "generic_term": 1,
+                        "exclude": -4},
+            "threshold": 2,
+        },
+        "strong_abbreviations": ["НМЦК", "ЗК"],
+        "rostec_markers": ["ростех", "епоз"],
+        "domain_phrases": ["запрос предложений", "закупочная документация"],
+        "generic_terms": ["закупка", "закупки", "договор", "участник", "заявка"],
+        "exclude": ["купить", "магазин"],
+    }
+
+    def setUp(self):
+        from routing import rule_router
+        from config import settings
+
+        rule_router.clear_cache()
+        self.rule_router = rule_router
+        self._tmp = tempfile.NamedTemporaryFile(
+            mode="w", suffix=".json", delete=False, encoding="utf-8")
+        json.dump(self.VOCAB, self._tmp, ensure_ascii=False)
+        self._tmp.close()
+        self.addCleanup(self._cleanup)
+        patcher = mock.patch.object(settings, "routing_vocab_file",
+                                    self._tmp.name)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def _cleanup(self):
+        import os
+        try:
+            os.unlink(self._tmp.name)
+        except OSError:
+            pass
+
+    def test_domain_phrase_hits_threshold(self):
+        self.assertEqual(self.rule_router.route("как провести запрос предложений?",
+                                                {"epoz", "chat"}), "epoz")
+        total, hits = self.rule_router.score("как провести запрос предложений?")
+        self.assertGreaterEqual(total, 2)
+        self.assertIn(("domain", "запрос предложений"), hits)
+
+    def test_single_generic_term_is_not_enough(self):
+        self.assertIsNone(self.rule_router.route("что такое закупка",
+                                                 {"epoz", "chat"}))
+
+    def test_two_generic_terms_reach_threshold(self):
+        # «закупки» + «договор» = 2 generic-сигнала
+        self.assertEqual(self.rule_router.route(
+            "порядок заключения договора по результатам закупки",
+            {"epoz", "chat"}), "epoz")
+
+    def test_abbreviation_uses_word_boundary(self):
+        self.assertEqual(self.rule_router.route("что такое НМЦК?",
+                                                {"epoz", "chat"}), "epoz")
+        # «ЗК» не должен ловиться внутри обычного слова
+        self.assertIsNone(self.rule_router.route("заказчик просит помощи",
+                                                 {"epoz", "chat"}))
+
+    def test_exclude_negates_weak_signal(self):
+        self.assertIsNone(self.rule_router.route(
+            "где купить закупку", {"epoz", "chat"}))
+
+    def test_target_not_in_candidates_returns_none(self):
+        self.assertIsNone(self.rule_router.route(
+            "запрос предложений по 223-фз", {"chat", "tech_rag"}))
+
+    def test_disabled_with_empty_path(self):
+        from config import settings
+
+        with mock.patch.object(settings, "routing_vocab_file", ""):
+            self.rule_router.clear_cache()
+            self.assertEqual(self.rule_router.score("запрос предложений"),
+                             (0, []))
+            self.assertIsNone(self.rule_router.route("запрос предложений",
+                                                     {"epoz", "chat"}))
+
+
+class RuleRouterIntegrationTests(unittest.TestCase):
+    """Stage 0 каскада: уверенный хит словаря обходит эмбеддинги и LLM."""
+
+    def test_vocab_hit_short_circuits_embedding(self):
+        from routing import router_service, rule_router
+        from config import settings
+
+        router_service._cache.clear()
+        rule_router.clear_cache()
+        tmp = tempfile.NamedTemporaryFile(
+            mode="w", suffix=".json", delete=False, encoding="utf-8")
+        json.dump(RuleRouterTests.VOCAB, tmp, ensure_ascii=False)
+        tmp.close()
+        try:
+            with mock.patch.object(settings, "routing_vocab_file", tmp.name), \
+                    mock.patch.object(settings, "routing_vocab_agent_id",
+                                      "epoz"), \
+                    mock.patch("routing.embedding_router.route") as emb, \
+                    mock.patch("routing.llm_router.route") as llm:
+                agent = run(MasterRouter().route(
+                    "что такое НМЦК?", allowed={"epoz", "chat"}))
+
+            self.assertEqual(agent, "epoz")
+            emb.assert_not_called()
+            llm.assert_not_called()
+        finally:
+            import os
+            try:
+                os.unlink(tmp.name)
+            except OSError:
+                pass
 
 
 class LruCacheTests(unittest.TestCase):
