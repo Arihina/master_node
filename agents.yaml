@@ -8,6 +8,7 @@ agents:
   routable: true
   capabilities:
   - chat
+  - attachments
   contract_forms:
   - chat_completions
   - responses
