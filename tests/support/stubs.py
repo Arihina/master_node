@@ -113,7 +113,10 @@ def install_agent_transport() -> dict[str, object]:
         apps[agent_id] = fake_agent.make_fake_agent(
             agent_id,
             has_sources=agent_id in ("epoz", "tech_rag"),
-            has_files=agent_id == "document_chat",
+            # Ровно то, что агент заявил в реестре: заглушка не должна быть
+            # скупее настоящего агента, иначе тест проверит выдуманный
+            # контракт. "attachments" = есть /v1/files и отказ на инлайн.
+            has_files="attachments" in AGENTS[agent_id].capabilities,
         )
     apps["ocr"] = fake_agent.make_fake_ocr_agent()
     if "rag_ingestion" in AGENTS:

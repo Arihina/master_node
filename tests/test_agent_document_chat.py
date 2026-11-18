@@ -1,8 +1,13 @@
-"""document_chat — единственный агент с вложениями.
+"""document_chat — агент, чья работа целиком построена на вложениях.
 
 Своя часть контракта: /v1/files (OpenAI Files API) и подключение документа к
 вопросу через file_id. Документ сначала загружается и проходит распознавание,
 и только потом на него ссылаются — инлайновых вложений агент не принимает.
+
+Вложений в реестре больше не одно: `attachments` заявляет и epoz (документ +
+поиск по ЕПоЗ). Поэтому «один агент на вложение» здесь нигде не предполагается
+— `auto` с файлом сужает круг до агентов с этим флагом, а внутри круга
+выбирает обычная семантика.
 """
 
 from __future__ import annotations
@@ -154,9 +159,14 @@ class DocumentChatFilesTests(MasterTestCase):
 
 class DocumentChatRoutingTests(MasterTestCase):
     """Вложение — более жёсткий признак, чем смысл текста: запрос с файлом
-    уходит агенту с capability attachments независимо от семантики."""
+    сужает кандидатов до агентов с capability attachments независимо от
+    семантики. Внутри этого круга (document_chat, epoz) выбор снова делает
+    семантика — поэтому проверяется не конкретный агент, а то, что запрос
+    вообще не ушёл агенту без вложений."""
 
     def test_auto_with_file_part_routes_to_attachment_agent(self):
+        from registry import AGENTS
+
         response = self.chat({
             "model": "auto",
             "messages": [{"role": "user", "content": [
@@ -164,11 +174,18 @@ class DocumentChatRoutingTests(MasterTestCase):
                 {"type": "file", "file": {"file_id": f"file-{env.MISSING_UUID}"}},
             ]}],
         })
-        # Файл несуществующий, поэтому ответ — 404 от document_chat, а не от
-        # роутера: важно, что запрос вообще доехал до агента с вложениями.
-        self.assertIn(response.status_code, (200, 404), response.text)
+        # Такого файла нет ни у кого, поэтому ответ — 404 от агента с
+        # вложениями (по тексту вопроса — epoz), а не от роутера. Если бы
+        # сужение по capabilities не сработало, запрос ушёл бы в chat, тот
+        # файл бы проигнорировал и вернул 200 — это и ловим.
+        attachment_agents = {a.id for a in AGENTS.values()
+                             if "attachments" in a.capabilities}
         if response.status_code == 404:
             self.assertOpenAIError(response, 404, "not_found_error")
+        else:
+            self.assertEqual(response.status_code, 200, response.text)
+            self.assertIn(response.json()["model"], attachment_agents,
+                          "ответ пришёл от агента без вложений — файл потерялся")
 
     def test_auto_with_image_url_routes_to_attachment_agent(self):
         """image_url — тоже вложение. Раньше мастер его не распознавал и
@@ -183,14 +200,41 @@ class DocumentChatRoutingTests(MasterTestCase):
         })
         error = self.assertOpenAIError(response, 400, "invalid_request_error")
         self.assertIn("/v1/files", error["message"],
-                      "запрос с картинкой должен был доехать до document_chat")
+                      "запрос с картинкой должен был доехать до агента "
+                      "с вложениями (epoz — по тексту вопроса), а вернул "
+                      "обычный ответ без документа")
 
-    def test_only_attachment_agent_declares_capability(self):
+    def test_attachment_capability_is_backed_by_files_api(self):
+        """`attachments` в реестре — обещание агента, а не украшение.
+
+        Агентов с этим флагом может быть несколько (document_chat, epoz), и
+        `auto` с файлом выбирает между ними семантически. Проверка поэтому
+        идёт по каждому заявившемуся: файл обязан приниматься и доходить до
+        файлового слоя (404 на несуществующий id), а не отбиваться как
+        неподдерживаемая часть запроса.
+        """
         from registry import AGENTS
 
         with_attachments = {a.id for a in AGENTS.values()
-                            if "attachments" in a.capabilities}
-        self.assertEqual(with_attachments, {"document_chat"})
+                            if a.enabled and "attachments" in a.capabilities}
+        self.assertIn("document_chat", with_attachments,
+                      "агент, вся работа которого — документы, обязан "
+                      "заявлять attachments")
+
+        for agent_id in sorted(with_attachments):
+            with self.subTest(agent=agent_id):
+                listed = self.agent("GET", agent_id, "v1/files")
+                self.assertEqual(listed.status_code, 200, listed.text)
+
+                response = self.chat({
+                    "model": agent_id,
+                    "messages": [{"role": "user", "content": [
+                        {"type": "text", "text": "про что документ"},
+                        {"type": "file", "file": {
+                            "file_id": f"file-{env.MISSING_UUID}"}},
+                    ]}],
+                })
+                self.assertOpenAIError(response, 404, "not_found_error")
 
 
 if __name__ == "__main__":

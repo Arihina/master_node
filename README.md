@@ -120,9 +120,12 @@
 `api/resolve.py`:
 
 1. отсеять агентов без `"attachments"`, затем без `routable`;
-2. остался один кандидат — вернуть его (обычный случай: `document_chat`);
+2. остался один кандидат — вернуть его (случай единственного агента на всё
+   умение);
 3. кандидатов несколько и в запросе есть текст — отдать в тот же
-   `MasterRouter.route(question, allowed=candidates)`;
+   `MasterRouter.route(question, allowed=candidates)`: вложения умеют и
+   `document_chat`, и `epoz`, а «про что документ» и «какой способ закупки
+   выбрать» — разные вопросы, алфавит их не различает;
 4. кандидатов несколько, текста нет вообще — `sorted(candidates)[0]` плюс
    `logger.warning` со списком кандидатов.
 
@@ -130,8 +133,9 @@
 единого слова, роутить не по чему. Раньше `sorted()[0]` покрывал вообще все
 случаи с вложением; при статическом реестре это было безопасно (агент с
 `attachments` был ровно один), но с [админским
-API](#админский-api-реестра) второго такого агента заводят одним `POST`, и
-выбор молча уехал бы по алфавиту.
+API](#админский-api-реестра) второго такого агента заводят одним `POST` —
+и `attachments` действительно появился у `epoz`, — после чего выбор молча
+уехал бы по алфавиту.
 
 ### Оценка качества роутинга
 
@@ -397,6 +401,8 @@ DELETE /agents/{agent_id}/v1/platform/conversations/{conversation_id}
 пережитком старого контракта (single-shot ручка `/agents/{id}/documents`,
 которой ни у кого нет) и вводили в заблуждение — `require_capability`
 пропускал бы вызов дальше, а адаптер честно падал в `CapabilityNotSupported`.
+Такой же набор теперь и у `epoz`: он тоже принимает `/v1/files` и применяет
+документ к вопросу (вместе с RAG-поиском по ЕПоЗ).
 
 ## Контракт агента
 
@@ -794,15 +800,17 @@ curl -X POST http://127.0.0.1:8000/v1/responses \
   -d '{"model": "ocr", "input": "привет"}'
 # -> {"error": {"message": "Агент ocr не поддерживает форму Responses API", ...}}
 
-# вложение при auto — роутер вообще не участвует, кандидаты сразу сужены
-# до agent.capabilities содержит "attachments" (сейчас — только document_chat)
+# вложение при auto — кандидаты сразу сужены до агентов, у которых в
+# capabilities есть "attachments" (document_chat и epoz); текст запроса
+# роутер получает уже внутри этого круга
 curl -X POST http://127.0.0.1:8000/v1/responses \
   -H "Content-Type: application/json" -H "X-User-Id: $U" \
   -d '{"model": "auto", "input": [{"role": "user", "content": [
         {"type": "input_text", "text": "какая сумма в накладной?"},
         {"type": "input_file", "file_id": "file-85b365de-..."}
       ]}]}'
-# в ответе "model":"document_chat" — единственный кандидат с attachments+responses
+# в ответе "model":"document_chat" — выбор семантики внутри пары
+# document_chat/epoz, а не единственный агент с attachments+responses
 
 # OCR: файл-в/текст-из, напрямую по id (без диалога), поле файла — file
 curl -N -X POST http://127.0.0.1:8000/agents/ocr/ocr \
