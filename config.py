@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -44,6 +45,31 @@ class Settings(BaseSettings):
     # (как agents_file). Пустой путь выключает слой.
     routing_vocab_file: str = ""
     routing_vocab_agent_id: str = "epoz"
+
+    # аутентификация
+    # keycloak — валидация JWT по JWKS (prod); dev_header — доверенный
+    # X-User-Id для локальной разработки и STUB-тестов.
+    auth_mode: str = "keycloak"
+    keycloak_issuer: str = ""
+    keycloak_jwks_url: str = ""
+    keycloak_audience: str = "master-node"
+    keycloak_client_id: str = "master-node"
+    keycloak_algorithms: list[str] = ["RS256"]
+    keycloak_leeway: int = 30
+    keycloak_jwks_cache_ttl: int = 300
+    keycloak_http_timeout: float = 5.0
+    keycloak_verify_tls: bool = True
+    # Роли из realm_access.roles / resource_access.<client>.roles.
+    admin_role: str = "platform-admin"
+    user_role: str = "platform-user"
+
+    @field_validator("keycloak_algorithms", mode="before")
+    @classmethod
+    def _split_algorithms(cls, v):
+        """Разрешить и JSON-список, и «RS256,ES256» через запятую."""
+        if isinstance(v, str):
+            return [a.strip() for a in v.split(",") if a.strip()]
+        return v
 
     agents_file: str = "agents.yaml"
 
