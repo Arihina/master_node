@@ -1,3 +1,4 @@
+import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
@@ -7,19 +8,28 @@ from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from config import settings
+from auth import close_auth
 from adapters import close_all, CapabilityNotSupported
 from registry_service import agent_registry
 from api import meta, chat, responses, agent_proxy, admin
 
+logger = logging.getLogger(__name__)
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    if settings.auth_mode == "dev_header":
+        logger.warning(
+            "auth_mode=dev_header — доверенный X-User-Id без проверки JWT. "
+            "Только для локальной разработки и тестов, НЕ для прода.")
     yield
     await agent_registry.aclose()
     await close_all()
+    await close_auth()
 
 
-app = FastAPI(lifespan=lifespan)
+app = FastAPI(lifespan=lifespan, docs_url=None, redoc_url=None,
+              openapi_url=None)
 
 app.add_middleware(
     CORSMiddleware,
@@ -39,6 +49,7 @@ app.include_router(admin.router)
 _ERROR_TYPES = {
     400: "invalid_request_error",
     401: "authentication_error",
+    403: "permission_error",
     404: "not_found_error",
     409: "invalid_request_error",
     413: "invalid_request_error",

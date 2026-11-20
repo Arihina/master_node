@@ -1,7 +1,8 @@
 import time
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 
+from auth import get_user_id
 from registry import AGENTS
 from schemas.chat import RouteRequest
 from api.deps import master_router
@@ -49,7 +50,13 @@ async def retrieve_model(model_id: str):
 
 
 @router.post("/route")
-async def route_message(payload: RouteRequest):
-    """Внутренняя debug-ручка — не часть OpenAI-контракта. Показывает, какого
-    агента выбрал бы model="auto" для этого текста, без реального вызова."""
+async def route_message(payload: RouteRequest,
+                        _user: str = Depends(get_user_id)):
+    """Resolve-ручка для фронтенда (и отладки): какого агента выбрал бы
+    model="auto" для этого текста, без реального вызова генерации.
+
+    Нужна, чтобы фронт мог создать чат ДО первого сообщения: сначала узнать
+    agent_id, затем POST /agents/{agent_id}/v1/platform/conversations, и уже
+    потом слать сообщения с model=<agent_id> и conversation_id. Не часть
+    OpenAI-контракта; доступна любому аутентифицированному пользователю."""
     return {"agent": await master_router.route(payload.message)}
