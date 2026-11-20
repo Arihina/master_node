@@ -36,6 +36,13 @@ def install_dependency_stubs() -> None:
     # словарь-правило в STUB-режиме выключен по умолчанию: тесты, которым
     # нужен этот слой, подменяют settings.routing_vocab_file явно
     os.environ.setdefault("routing_vocab_file", "")
+    # STUB-тесты ходят через доверенный заголовок X-User-Id; Keycloak-режим
+    # проверяется отдельно в test_auth.py (без живого Keycloak). Settings может
+    # быть уже инстанцирован (например, registry импортирован в тесте до
+    # вызова этого модуля), поэтому выставляем и env, и сам объект.
+    os.environ.setdefault("auth_mode", "dev_header")
+    from config import settings
+    settings.auth_mode = "dev_header"
 
     if "sentence_transformers" not in sys.modules:
         st = types.ModuleType("sentence_transformers")

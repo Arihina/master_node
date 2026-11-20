@@ -43,6 +43,8 @@ OTHER_USER_ID = "22222222-2222-2222-2222-222222222222"
 
 AUTH = {"X-User-Id": USER_ID}
 OTHER_AUTH = {"X-User-Id": OTHER_USER_ID}
+# В dev_header-режиме роль admin приходит заголовком X-User-Roles.
+ADMIN_AUTH = {"X-User-Id": USER_ID, "X-User-Roles": "admin"}
 
 
 def _master_agent_timeout(default: float = 300.0) -> float:

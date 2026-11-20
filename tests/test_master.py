@@ -108,7 +108,8 @@ class RoutingMechanicsTests(MasterTestCase):
                          "формы разошлись в выборе агента на одном и том же тексте")
 
     def test_route_debug_endpoint(self):
-        response = self.client.post("/route", json={"message": "привет"})
+        response = self.client.post("/route", json={"message": "привет"},
+                                    headers=env.AUTH)
         self.assertEqual(response.status_code, 200, response.text)
         self.assertIn(response.json()["agent"], DIALOGUE_AGENTS)
 
@@ -255,13 +256,14 @@ class RequestValidationTests(MasterTestCase):
         """Ошибка от валидатора FastAPI (а не наш явный raise) тоже обязана
         стать 400 с заполненным param: SDK мапит 422 в UnprocessableEntityError,
         мимо клиентского except BadRequestError."""
-        response = self.client.post("/route", json={})
+        response = self.client.post("/route", json={}, headers=env.AUTH)
         error = self.assertOpenAIError(response, 400, "invalid_request_error")
         self.assertEqual(error["param"], "message",
                          "param должен указывать на проблемное поле, а не быть null")
 
     def test_pydantic_validation_nested_param(self):
-        response = self.client.post("/route", json={"message": 123})
+        response = self.client.post(
+            "/route", json={"message": 123}, headers=env.AUTH)
         error = self.assertOpenAIError(response, 400, "invalid_request_error")
         self.assertEqual(error["param"], "message")
 
