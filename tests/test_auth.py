@@ -9,6 +9,7 @@ _jwt_principal/маршруты через подменённый _verify_token,
 from __future__ import annotations
 
 import asyncio
+import base64
 import time
 import unittest
 from contextlib import ExitStack
@@ -194,6 +195,73 @@ class JwtVerificationTests(unittest.TestCase):
         with self.assertRaises(HTTPException) as ctx:
             self._verify(self._token(iss="http://evil/realms/tidi"))
         self.assertEqual(ctx.exception.status_code, 401)
+
+
+def _b64url_uint(n: int) -> str:
+    raw = n.to_bytes((n.bit_length() + 7) // 8, "big")
+    return base64.urlsafe_b64encode(raw).rstrip(b"=").decode()
+
+
+class JwksCacheTests(unittest.TestCase):
+    """Реальный PyJWKSet: регрессия на то, что у PyJWKSet нет get_signing_key.
+
+    Раньше тесты подменяли auth._jwks.get_signing_key целиком и пропустили
+    AttributeError, падавший на живом JWKS Keycloak."""
+
+    def setUp(self):
+        self.private = rsa.generate_private_key(public_exponent=65537,
+                                                key_size=2048)
+        self.public = self.private.public_key()
+        numbers = self.public.public_numbers()
+        self.jwk = {
+            "kty": "RSA", "kid": "k1", "use": "sig", "alg": "RS256",
+            "n": _b64url_uint(numbers.n), "e": _b64url_uint(numbers.e),
+        }
+
+    def _token(self, **overrides) -> str:
+        claims = {
+            "iss": "http://iss/realms/tidi",
+            "aud": "master-node",
+            "sub": env.USER_ID,
+            "iat": int(time.time()),
+            "exp": int(time.time()) + 300,
+        }
+        claims.update(overrides)
+        return pyjwt.encode(claims, self.private, algorithm="RS256",
+                            headers={"kid": "k1"})
+
+    def _cache(self) -> auth._JwksCache:
+        cache = auth._JwksCache()
+        cache._jwks = pyjwt.PyJWKSet.from_dict({"keys": [self.jwk]})
+        cache._fetched_at = time.time()
+        return cache
+
+    def test_pick_by_kid(self):
+        self.assertIsNotNone(self._cache()._pick("k1").key)
+
+    def test_pick_single_key_without_kid(self):
+        self.assertIsNotNone(self._cache()._pick(None).key)
+
+    def test_unknown_kid_raises(self):
+        with self.assertRaises(KeyError):
+            self._cache()._pick("nope")
+
+    def test_verify_token_with_real_jwks(self):
+        """Полный путь _verify_token через настоящий PyJWKSet, без мока key."""
+        cache = self._cache()
+        with ExitStack() as stack:
+            stack.enter_context(mock.patch.object(
+                settings, "keycloak_jwks_url", "http://x/certs"))
+            stack.enter_context(mock.patch.object(
+                settings, "keycloak_issuer", "http://iss/realms/tidi"))
+            stack.enter_context(mock.patch.object(
+                settings, "keycloak_audience", "master-node"))
+            stack.enter_context(mock.patch.object(
+                settings, "keycloak_algorithms", ["RS256"]))
+            stack.enter_context(mock.patch.object(settings, "keycloak_leeway", 0))
+            stack.enter_context(mock.patch.object(auth, "_jwks", cache))
+            claims = asyncio.run(auth._verify_token(self._token()))
+        self.assertEqual(claims["sub"], env.USER_ID)
 
 
 if __name__ == "__main__":

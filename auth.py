@@ -92,13 +92,23 @@ class _JwksCache:
             if self._jwks is None or self._stale():
                 await self._refresh()
             try:
-                return self._jwks.get_signing_key(kid).key
-            except jwt.PyJWTError:
+                return self._pick(kid).key
+            except KeyError:
+                # Ротация: новый kid ещё не в кэше — обновляем один раз.
                 await self._refresh()
                 try:
-                    return self._jwks.get_signing_key(kid).key
-                except jwt.PyJWTError:
+                    return self._pick(kid).key
+                except KeyError:
                     raise HTTPException(401, "Неизвестный ключ подписи токена")
+
+    def _pick(self, kid: str | None) -> jwt.PyJWK:
+        """PyJWKSet ищет ключ по kid через __getitem__ (KeyError, если нет)."""
+        if kid:
+            return self._jwks[kid]
+        # Некоторые JWKS не отдают kid; если ключ ровно один — берём его.
+        if len(self._jwks.keys) == 1:
+            return self._jwks.keys[0]
+        raise KeyError(kid)
 
     async def _refresh(self) -> None:
         if not settings.keycloak_jwks_url:
