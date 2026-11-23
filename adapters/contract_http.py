@@ -7,6 +7,10 @@ import httpx
 
 from registry import AgentInfo
 from config import settings
+from internal_auth import (
+    INTERNAL_TOKEN_HEADER, REQUEST_ID_HEADER, agent_internal_token,
+    current_request_id, new_request_id,
+)
 from .base import AgentAdapter, ProxyResult, AgentUnavailable
 
 
@@ -36,9 +40,19 @@ class ContractHTTPAdapter(AgentAdapter):
         self, method: str, path: str, user_id: str,
         body: bytes | AsyncIterator[bytes] | None = None,
         content_type: str | None = None,
+        request_id: str | None = None,
     ) -> ProxyResult:
         url = f"{self._base}{path}"
         headers = {"X-User-Id": user_id, "Accept-Encoding": "identity"}
+
+        # X-Request-Id нужен для корреляции master и агента.
+        headers[REQUEST_ID_HEADER] = (
+            request_id or current_request_id() or new_request_id())
+
+        token = agent_internal_token(self.agent_id)
+        if token:
+            headers[INTERNAL_TOKEN_HEADER] = token
+
         if content_type:
             headers["Content-Type"] = content_type
 

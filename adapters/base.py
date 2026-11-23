@@ -68,6 +68,7 @@ class AgentAdapter(ABC):
         self, method: str, path: str, user_id: str,
         body: bytes | AsyncIterator[bytes] | None = None,
         content_type: str | None = None,
+        request_id: str | None = None,
     ) -> ProxyResult:
         """path — с ведущим слэшем, например "/v1/chat/completions/{id}/feedback".
 
@@ -81,13 +82,19 @@ class AgentAdapter(ABC):
         refused) — бросает AgentUnavailable, мастер превращает это в 502.
         После получения статус-кода — статус и тело агента идут насквозь
         без интерпретации, включая ошибки агента (у него тот же формат
-        {"error": {...}}, пересобирать нечего)."""
+        {"error": {...}}, пересобирать нечего).
+
+        request_id — сквозной идентификатор для логов. None означает «взять
+        из контекста текущего запроса» (его ставит
+        internal_auth.RequestContextMiddleware), а если контекста нет —
+        сгенерировать новый."""
         ...
 
     async def aclose(self) -> None:
         """Освободить ресурсы."""
 
-    def run_ocr(self, user_id: str, filename: str, content: bytes) -> AsyncIterator[bytes]:
+    def run_ocr(self, user_id: str, filename: str, content: bytes,
+                request_id: str | None = None) -> AsyncIterator[bytes]:
         raise CapabilityNotSupported(self.agent_id, "ocr")
 
     async def upload_document(

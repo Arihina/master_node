@@ -29,7 +29,8 @@ class ExternalAPIAdapter(AgentAdapter):
         # self._store = ConversationStore(...)
         # self._client = httpx.AsyncClient(base_url=...)
 
-    async def proxy(self, method, path, user_id, body=None, content_type=None) -> ProxyResult:
+    async def proxy(self, method, path, user_id, body=None, content_type=None,
+                    request_id=None) -> ProxyResult:
         raise NotImplementedError(
             "разобрать path, обслужить его поверх API вендора и общего "
             "стора, вернуть ProxyResult(status, content_type, body)"

@@ -5,6 +5,10 @@ import json
 import httpx
 
 from config import settings
+from internal_auth import (
+    INTERNAL_TOKEN_HEADER, REQUEST_ID_HEADER, agent_internal_token,
+    current_request_id, new_request_id,
+)
 from registry import AgentInfo
 
 from .base import AgentAdapter, AgentUnavailable, ProxyResult
@@ -20,7 +24,8 @@ class OCRAdapter(AgentAdapter):
         self._url = agent.url
         self._client = httpx.AsyncClient(timeout=settings.agent_timeout)
 
-    async def proxy(self, method, path, user_id, body=None, content_type=None) -> ProxyResult:
+    async def proxy(self, method, path, user_id, body=None, content_type=None,
+                    request_id=None) -> ProxyResult:
         async def _not_found():
             err = {"error": {
                 "message": f"У ocr нет '{path}' — это не contract-агент",
@@ -29,12 +34,21 @@ class OCRAdapter(AgentAdapter):
             yield json.dumps(err, ensure_ascii=False).encode()
         return ProxyResult(status=404, content_type="application/json", body=_not_found())
 
-    async def run_ocr(self, user_id, filename, content):
+    async def run_ocr(self, user_id, filename, content, request_id=None):
+        headers = {
+            "X-User-Id": user_id,
+            REQUEST_ID_HEADER: (
+                request_id or current_request_id() or new_request_id()),
+        }
+        token = agent_internal_token(self.agent_id)
+        if token:
+            headers[INTERNAL_TOKEN_HEADER] = token
+
         try:
             resp = await self._client.post(
                 f"{self._url}/ocr",
                 files={"file": (filename, content)},
-                headers={"X-User-Id": user_id},
+                headers=headers,
             )
         except httpx.RequestError as e:
             raise AgentUnavailable(self.agent_id, str(e)) from e
