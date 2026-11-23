@@ -1,7 +1,7 @@
 {
   "realm": "tidi",
   "enabled": true,
-  "registrationAllowed": false,
+  "registrationAllowed": true,
   "verifyEmail": false,
   "loginWithEmailAllowed": true,
   "duplicateEmailsAllowed": false,
@@ -25,11 +25,16 @@
       "authorizationServicesEnabled": false,
       "redirectUris": [
         "http://localhost:3000/*",
-        "http://127.0.0.1:3000/*"
+        "http://127.0.0.1:3000/*",
+        "http://${PUBLIC_IP}:8005/auth/callback",
+        "pro.tidi.tidi_assistant_flutter:/oauth2redirect",
+        "com.example.tidi_assistant_flutter:/oauth2redirect",
+        "ru.tidi.app:/oauth2redirect"
       ],
       "webOrigins": [
         "http://localhost:3000",
-        "http://127.0.0.1:3000"
+        "http://127.0.0.1:3000",
+        "http://${PUBLIC_IP}:8005"
       ],
       "attributes": {
         "pkce.code.challenge.method": "S256",

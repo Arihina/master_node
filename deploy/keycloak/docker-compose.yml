@@ -8,9 +8,9 @@
 #   cp .env.example .env
 #   # задайте пароли в .env
 #   docker compose up -d
-#   # readiness: http://127.0.0.1:8081/realms/tidi/.well-known/openid-configuration
-#   # админ-консоль:  http://127.0.0.1:8081/admin/
-#   # realm тиди:     http://127.0.0.1:8081/realms/tidi
+#   # readiness: http://127.0.0.1:8081/auth/realms/tidi/.well-known/openid-configuration
+#   # админ-консоль:  http://127.0.0.1:8081/auth/admin/
+#   # realm тиди:     http://127.0.0.1:8081/auth/realms/tidi
 #
 # Realm импортируется из ./tidi-realm.json при ПЕРВОМ старте (start --import-realm).
 # Если realm уже существует — импорт пропускается (см. README), пользователи и
@@ -57,8 +57,13 @@ services:
       KC_HTTP_PORT: 8080
       KC_HOSTNAME_STRICT: "false"
       KC_HOSTNAME_STRICT_HTTPS: "false"
+      # Keycloak отдаётся наружу nginx'ом по пути /auth/ на порту 8005
+      KC_HTTP_RELATIVE_PATH: /auth
       # за nginx будут X-Forwarded-* заголовки
       KC_PROXY_HEADERS: xforwarded
+
+      # Подстановка ${PUBLIC_IP} в tidi-realm.json (redirect URIs / web origins).
+      PUBLIC_IP: ${PUBLIC_IP:?set PUBLIC_IP in .env}
 
       # --- операции ---
       KC_HEALTH_ENABLED: "true"
