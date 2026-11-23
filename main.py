@@ -10,14 +10,24 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from config import settings
 from auth import close_auth
 from adapters import close_all, CapabilityNotSupported
+from internal_auth import (
+    REQUEST_ID_HEADER, RequestContextMiddleware, validate_startup,
+)
 from registry_service import agent_registry
 from api import meta, chat, responses, agent_proxy, admin
+
+logging.basicConfig(
+    level=getattr(logging, settings.log_level, logging.WARNING),
+    format="%(asctime)s %(levelname)s %(name)s %(message)s",
+)
 
 logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    validate_startup()
+
     if settings.auth_mode == "dev_header":
         logger.warning(
             "auth_mode=dev_header — доверенный X-User-Id без проверки JWT. "
@@ -36,7 +46,10 @@ app.add_middleware(
     allow_origins=["*"],
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=[REQUEST_ID_HEADER],
 )
+
+app.add_middleware(RequestContextMiddleware)
 
 
 app.include_router(meta.router)

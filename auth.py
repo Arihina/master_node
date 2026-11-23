@@ -11,6 +11,7 @@ import jwt
 from fastapi import Depends, HTTPException, Request
 
 from config import settings
+from internal_auth import set_current_user
 
 logger = logging.getLogger(__name__)
 
@@ -184,10 +185,14 @@ async def _jwt_principal(request: Request) -> Principal:
 
 async def get_principal(request: Request) -> Principal:
     if settings.auth_mode == "keycloak":
-        return await _jwt_principal(request)
-    if settings.auth_mode == "dev_header":
-        return _dev_principal(request)
-    raise HTTPException(500, f"Неизвестный auth_mode: {settings.auth_mode!r}")
+        principal = await _jwt_principal(request)
+    elif settings.auth_mode == "dev_header":
+        principal = _dev_principal(request)
+    else:
+        raise HTTPException(500, f"Неизвестный auth_mode: {settings.auth_mode!r}")
+
+    set_current_user(principal.user_id)
+    return principal
 
 
 async def get_user_id(principal: Principal = Depends(get_principal)) -> str:
