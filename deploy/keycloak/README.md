@@ -1,35 +1,41 @@
 # Keycloak (Postgres + Keycloak, HTTP)
 
-Локальный контур IdP для master-node. TLS на этом этапе не используется:
-снаружи ничего не публикуется, оба порта забинжены на `127.0.0.1`. Когда
-появится сертификат — nginx будет терминировать HTTPS и проксировать на
-Keycloak, а `KC_HOSTNAME_STRICT` можно вернуть в `true`.
+IdP для master-node. TLS пока не используется; контур работает по HTTP на
+белом IP через nginx. Сам Keycloak слушает `127.0.0.1:8081` с относительным
+путём `/auth`; наружу его отдаёт nginx на порту `8005` по пути `/auth/`.
+Когда появится домен/сертификат — nginx будет терминировать HTTPS, а
+`KC_HOSTNAME_STRICT` можно вернуть в `true`.
 
 ## Запуск
 
 ```bash
 cd deploy/keycloak
 cp .env.example .env
-# задайте KC_ADMIN_PASSWORD и KC_DB_PASSWORD
+# задайте KC_ADMIN_PASSWORD, KC_DB_PASSWORD и PUBLIC_IP (белый IP сервера)
 docker compose up -d
 ```
 
 Readiness (realm уже импортирован и отдаёт discovery):
 
 ```bash
-curl -sf http://127.0.0.1:8081/realms/tidi/.well-known/openid-configuration >/dev/null && echo UP
+curl -sf http://127.0.0.1:8081/auth/realms/tidi/.well-known/openid-configuration >/dev/null && echo UP
 ```
 
 (Health-эндпоинты `/health*` в Keycloak 26 висят на management-порту 9000
 внутри контейнера, наружу он не публикуется; для внешней проверки readiness
 удобнее discovery-эндпоинт выше.)
 
-Точки входа:
+Точки входа (напрямую, внутри контейнера):
 
-- админ-консоль: http://127.0.0.1:8081/admin/
-- realm: http://127.0.0.1:8081/realms/tidi
-- discovery (issuer): http://127.0.0.1:8081/realms/tidi/.well-known/openid-configuration
-- JWKS для master: http://127.0.0.1:8081/realms/tidi/protocol/openid-connect/certs
+- админ-консоль: http://127.0.0.1:8081/auth/admin/
+- realm: http://127.0.0.1:8081/auth/realms/tidi
+- discovery (issuer): http://127.0.0.1:8081/auth/realms/tidi/.well-known/openid-configuration
+- JWKS для master: http://127.0.0.1:8081/auth/realms/tidi/protocol/openid-connect/certs
+
+Наружу (через nginx на белом IP):
+
+- OIDC authority: `http://<PUBLIC_IP>:8005/auth/realms/tidi`
+- админ-консоль: `http://<PUBLIC_IP>:8005/auth/admin/` (наружу НЕ открывать)
 
 ## Что импортируется
 
@@ -37,7 +43,13 @@ curl -sf http://127.0.0.1:8081/realms/tidi/.well-known/openid-configuration >/de
 
 - клиент `master-node` (public, Authorization Code + PKCE, `S256`);
 - audience-mapper, добавляющий `master-node` в `aud` access-токена;
-- realm-роли `platform-user` и `platform-admin`.
+- realm-роли `platform-user` и `platform-admin`;
+- redirect URIs для web (`http://${PUBLIC_IP}:8005/auth/callback`) и трёх
+  мобильных схем (`pro.tidi.tidi_assistant_flutter:/oauth2redirect`,
+  `com.example.tidi_assistant_flutter:/oauth2redirect`,
+  `ru.tidi.app:/oauth2redirect`), web origin `http://${PUBLIC_IP}:8005`.
+  `${PUBLIC_IP}` подставляется из env контейнера при импорте (значение из
+  `.env`).
 
 Импорт выполняется при **первом** старте (`start --import-realm`). Если realm
 уже существует, Keycloak **пропускает** импорт, поэтому созданные через
@@ -62,10 +74,10 @@ curl -sf http://127.0.0.1:8081/realms/tidi/.well-known/openid-configuration >/de
 Роль `platform-admin` даёт доступ только к `/admin/**` и `/route`. Доступа к
 чужим данным она не даёт: скоупинг по `sub` остаётся в агентах.
 
-Регистрация самостоятельная (`registrationAllowed`) по умолчанию **выключена**:
-пользователей заводит администратор. Для открытой регистрации включите её в
-Realm settings → Login и обязательно настройте SMTP + Email verified + защиту
-от ботов; для пилота рекомендуется приглашения/ограничение по домену.
+Регистрация самостоятельная (`registrationAllowed`) сейчас **включена** без
+верификации email и без SMTP — временно, для пилота. Позже её можно выключить
+в Realm settings → Login. Перед боевым использованием открытую регистрацию
+нужно усилить: SMTP + Email verified + защита от ботов (или invite-only).
 
 ## Как получить JWT для проверки master (без фронтенда)
 
@@ -85,18 +97,17 @@ SPA они не нужны и небезопасны.
 
 ```env
 AUTH_MODE=keycloak
-KEYCLOAK_ISSUER=http://127.0.0.1:8081/realms/tidi
-KEYCLOAK_JWKS_URL=http://127.0.0.1:8081/realms/tidi/protocol/openid-connect/certs
+KEYCLOAK_ISSUER=http://<PUBLIC_IP>:8005/auth/realms/tidi
+KEYCLOAK_JWKS_URL=http://127.0.0.1:8081/auth/realms/tidi/protocol/openid-connect/certs
 KEYCLOAK_AUDIENCE=master-node
 KEYCLOAK_CLIENT_ID=master-node
 ADMIN_ROLE=platform-admin
 ```
 
-`KEYCLOAK_ISSUER` обязан совпадать с `iss` в токене. Пока контур на HTTP и
-`KC_HOSTNAME_STRICT=false`, issuer строится из того URL, по которому клиент
-обратился к Keycloak (`http://127.0.0.1:8081/realms/tidi`). После перехода на
-HTTPS/nginx issuer станет `https://<домен>/realms/tidi` — обновите
-`KEYCLOAK_ISSUER` и `KEYCLOAK_JWKS_URL` одновременно с `KC_HOSTNAME`.
+`KEYCLOAK_ISSUER` обязан совпадать с `iss` в токене, т.е. с публичным URL
+Keycloak (`http://<PUBLIC_IP>:8005/auth/realms/tidi`). JWKS master может тянуть
+по внутреннему адресу `127.0.0.1:8081` — важно, что там тоже есть префикс
+`/auth` из-за `KC_HTTP_RELATIVE_PATH`.
 
 ## Остановка и данные
 
@@ -108,3 +119,10 @@ docker compose down -v       # полное удаление БД (и импор
 Бэкап: штатный `pg_dump` из контейнера postgres или `docker compose exec
 postgres pg_dump -U keycloak keycloak > keycloak.sql`. Realm можно
 дополнительно экспортировать через `kc.sh export` (см. docs Keycloak).
+
+## Связанные документы
+
+- [docs/authentication.md](../../docs/authentication.md) — JWT, режимы, env.
+- [docs/roles.md](../../docs/roles.md) — роли и права master.
+- [docs/frontend-auth.md](../../docs/frontend-auth.md) — инструкция фронтенду
+  (web + mobile) и настройка nginx.

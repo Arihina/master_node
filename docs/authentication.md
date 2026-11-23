@@ -84,3 +84,14 @@ Docker-compose (Postgres + Keycloak, HTTP без TLS) и импорт realm — 
 [deploy/keycloak/README.md](../deploy/keycloak/README.md). Там же — создание
 пользователей, назначение ролей и точки входа.
 
+## Фронтенд (сайт и мобильное приложение)
+
+Инструкция для фронтендеров — [docs/frontend-auth.md](frontend-auth.md):
+регистрация, Authorization Code + PKCE, refresh/logout, работа с master API,
+мобильные redirect URI и настройка nginx.
+
+## Термины
+
+Глоссарий Keycloak (realm, client, claims, PKCE, direct grants и т.д.) —
+[docs/keycloak-glossary.md](keycloak-glossary.md).
+
