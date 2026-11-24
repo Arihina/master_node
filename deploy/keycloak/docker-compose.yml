@@ -71,6 +71,19 @@ services:
       KC_LOG_LEVEL: INFO
     ports:
       - "127.0.0.1:8081:8080"
+    # Стоковый образ не содержит quarkus-smallrye-health, поэтому /health/* и
+    # /metrics на management-порту 9000 отдают 404 (KC_HEALTH_ENABLED на это
+    # не влияет). Readiness проверяем через discovery реального realm на
+    # основном порту (8080) — bash /dev/tcp, т.к. в образе нет curl/wget.
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          bash -c 'exec 3<>/dev/tcp/127.0.0.1/8080 && printf "GET /auth/realms/tidi/.well-known/openid-configuration HTTP/1.0\r\nHost: localhost\r\nConnection: close\r\n\r\n" >&3 && grep -q " 200 " <&3'
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
     volumes:
       # Realm импортируется при первом старте и дальше пропускается.
       - ./tidi-realm.json:/opt/keycloak/data/import/tidi-realm.json:ro
