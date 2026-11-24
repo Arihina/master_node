@@ -122,10 +122,14 @@ async def _capability_handler(request: Request, exc: CapabilityNotSupported):
 if __name__ == "__main__":
     import uvicorn
 
+    # reload — только для разработки: в проде супервизор uvicorn держит
+    # лишний процесс и мешает корректно освобождать ресурсы. Благодаря
+    # ленивой загрузке эмбеддера `python main.py` в dev больше не грузит
+    # модель в родителе (см. guides/embedder-double-load-fix.md).
     uvicorn.run(
         "main:app",
         host=settings.host,
         port=settings.port,
-        reload=True,
+        reload=settings.env == "dev",
         timeout_keep_alive=settings.timeout_keep_alive,
     )

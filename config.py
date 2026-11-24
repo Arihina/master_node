@@ -4,7 +4,7 @@ import json
 import re
 from pathlib import Path
 
-from pydantic import Field, field_validator, model_validator
+from pydantic import AliasChoices, Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # Относительные пути в настройках резолвятся от корня проекта. Для секретов
@@ -197,6 +197,17 @@ class Settings(BaseSettings):
     ollama_model: str
     ollama_host: str = "http://localhost:11434"
     embedd_model: str
+    # Устройство эмбеддера: cpu | cuda | cuda:0 | mps. По умолчанию CPU
+    embedd_device: str = Field(
+        default="cpu",
+        validation_alias=AliasChoices("embedd_device", "embed_device"),
+    )
+
+    @field_validator("embedd_device", mode="before")
+    @classmethod
+    def _normalize_embed_device(cls, v):
+        value = str(v).strip() if v is not None else ""
+        return value or "cpu"
 
 
 settings = Settings()

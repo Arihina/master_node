@@ -10,7 +10,7 @@ from starlette.concurrency import run_in_threadpool
 import registry
 from registry import AGENTS, AgentInfo, RegistryFileError
 from adapters import factory
-from routing.embedding_router import index
+from routing import embedding_router
 from config import settings
 from schemas.agents import AgentCreate, AgentUpdate
 
@@ -97,7 +97,8 @@ class AgentRegistry:
             "enabled": sum(1 for a in AGENTS.values() if a.enabled),
             "routable": sum(1 for a in AGENTS.values()
                             if a.enabled and a.routable),
-            "embedding_index": sorted(index.ids()),
+            "embedding_index": sorted(embedding_router.index_ids()),
+            "embedder_loaded": embedding_router.is_embedder_loaded(),
             "adapter_cache": sorted(factory.cached_ids()),
             "fallback_agent": settings.fallback_agent,
         }
@@ -165,9 +166,11 @@ class AgentRegistry:
         diff = _diff(AGENTS, new_state)
 
         vectors = {}
-        for agent_id in diff.embeddings:
-            vectors[agent_id] = await run_in_threadpool(
-                index.encode_passages, new_state[agent_id].passage_texts)
+        if embedding_router.is_index_loaded():
+            for agent_id in diff.embeddings:
+                vectors[agent_id] = await run_in_threadpool(
+                    embedding_router.encode_passages,
+                    new_state[agent_id].passage_texts)
 
         if write:
             await run_in_threadpool(registry.write_file, new_state)
@@ -176,22 +179,17 @@ class AgentRegistry:
 
     def _apply(self, new_state: dict[str, AgentInfo], diff: Diff,
                vectors: dict) -> Applied:
-        new_vectors = index.snapshot()
-
-        for agent_id in diff.removed + diff.embeddings_cleared:
-            new_vectors.pop(agent_id, None)
-            
-        for agent_id, vector in vectors.items():
-            new_vectors[agent_id] = vector
-        index.replace(new_vectors)
+        embedding_router.apply_registry_update(
+            new_state,
+            vectors=vectors,
+            removed=set(diff.removed) | set(diff.embeddings_cleared),
+            needs_rebuild=bool(set(diff.embeddings) - set(vectors)),
+        )
 
         for agent_id in diff.adapters:
             adapter = factory.invalidate(agent_id)
             if adapter is not None:
                 self._close_later(adapter)
-
-        AGENTS.clear()
-        AGENTS.update(new_state)
 
         self.version += 1
         self.loaded_at = datetime.now(timezone.utc)

@@ -15,6 +15,7 @@ LLM-роутером (нужна поднятая Ollama). В STUB-режиме 
     venv/bin/python eval_routing.py              # эмбеддинг-слой + свип порога
     venv/bin/python eval_routing.py --llm        # полный каскад с LLM (нужна Ollama)
     venv/bin/python eval_routing.py --only epoz  # фильтр по id/тексту кейса
+    venv/bin/python eval_routing.py --device cpu # устройство (по умолчанию CPU)
 
 Выход:
     - таблица по кейсам: expected vs top-1 для обоих вариантов, скор, дельта,
@@ -40,7 +41,7 @@ import yaml
 
 from config import settings
 from registry import AGENTS
-from routing import embedding_router
+from routing.embedding_router import get_embed_model
 
 ROOT = Path(__file__).resolve().parent
 GOLDEN = ROOT / "tests" / "test_data" / "golden_routing.yaml"
@@ -49,7 +50,16 @@ THRESHOLD = settings.routing_threshold
 DELTA = settings.routing_ambiguity_delta
 LOW = settings.routing_low_threshold
 
-model = embedding_router.model  # SentenceTransformer(settings.embedd_model)
+# Модель грузится лениво: при `--help` и разборе аргументов GPU/CPU не
+# занимается. Устройство — из EMBEDD_DEVICE или флага --device.
+_model = None
+
+
+def get_model():
+    global _model
+    if _model is None:
+        _model = get_embed_model()
+    return _model
 
 SWEEP = (0.30, 0.32, 0.35, 0.38, 0.40, 0.42, 0.45,
          0.50, 0.55, 0.60, 0.69)
@@ -68,12 +78,12 @@ def candidates() -> dict[str, object]:
 
 def encode(texts: list[str], prefix: bool):
     texts = [f"query: {t}" if prefix else t for t in texts]
-    return model.encode(texts, normalize_embeddings=True)
+    return get_model().encode(texts, normalize_embeddings=True)
 
 
 def encode_passages(descriptions: list[str], prefix: bool):
     texts = [f"passage: {d}" if prefix else d for d in descriptions]
-    return model.encode(texts, normalize_embeddings=True)
+    return get_model().encode(texts, normalize_embeddings=True)
 
 
 def build_index(pool: dict[str, object], prefix: bool):
@@ -148,14 +158,19 @@ def main() -> int:
                         help="доигрывать неоднозначные/fallback кейсы через LLM-роутер")
     parser.add_argument("--only", default="",
                         help="фильтр: подстрока id или текста кейса")
+    parser.add_argument("--device", default=settings.embedd_device,
+                        help="устройство эмбеддера: cpu | cuda | cuda:0 | mps "
+                             f"(по умолчанию {settings.embedd_device})")
     args = parser.parse_args()
+    # Флаг важнее env: на занятой карте прогон не должен молча занять VRAM.
+    settings.embedd_device = str(args.device).strip() or "cpu"
 
     cases = [c for c in load_cases()
              if args.only.lower() in c["id"].lower()
              or args.only.lower() in c["query"].lower()]
     pool = candidates()
 
-    print(f"Эмбеддер: {settings.embedd_model}")
+    print(f"Эмбеддер: {settings.embedd_model} на {settings.embedd_device}")
     print(f"Кандидаты (enabled+routable): {', '.join(sorted(pool))}")
     print(f"Пороги из конфига: ROUTING_LOW_THRESHOLD={LOW}, "
           f"ROUTING_THRESHOLD={THRESHOLD}, ROUTING_AMBIGUITY_DELTA={DELTA}")

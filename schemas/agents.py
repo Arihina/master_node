@@ -101,5 +101,6 @@ class RegistryStatusRead(BaseModel):
     enabled: int
     routable: int
     embedding_index: list[str]
+    embedder_loaded: bool = False
     adapter_cache: list[str]
     fallback_agent: str
