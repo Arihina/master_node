@@ -50,8 +50,9 @@
 `{a.id for a in AGENTS.values() if a.enabled and a.routable}`. Это
 единственное место, где `routable=False`/`enabled=False` реально влияют на
 авто-роутинг — раньше (до правки) `embedding_router`/`llm_router` перебирали
-весь реестр без разбора, и агент вроде OCR (`routable=False`) теоретически
-мог быть выбран по семантическому совпадению, просто падая дальше в
+весь реестр без разбора, и инструментальный агент (`routable=False`, без
+диалога) теоретически мог быть выбран по семантическому совпадению, просто
+падая дальше в
 `CapabilityNotSupported`. Сейчас исключён на первом же шаге.
 
 Дальше — каскад из трёх слоёв, каждый следующий запускается только если
@@ -67,8 +68,14 @@
 1. **embedding_router** — семантическая близость запроса к описаниям агентов
    через модель из `EMBEDD_MODEL` (косинусная мера, пороги
    `ROUTING_LOW_THRESHOLD`/`ROUTING_THRESHOLD`/`ROUTING_AMBIGUITY_DELTA` из
-   конфига), вычисляется только среди `candidates`. Индекс multi-vector:
-   на агента хранится набор пассажей (`AgentInfo.passage_texts`), близость —
+   конфига), вычисляется только среди `candidates`. Модель и индекс пассажей
+   создаются **лениво, при первом обращении**: импорт `main`, `/v1/models`,
+   admin/status и health-проверки не занимают VRAM. Устройство задаётся
+   `EMBEDD_DEVICE` (по умолчанию `cpu` — bge-m3 на CPU кодирует запрос за
+   ~0.2–0.3 с и не конкурирует за карту с Ollama). Поэтому `python main.py`
+   с reload в dev больше не грузит вторую копию модели в родителе.
+   Индекс multi-vector: на агента хранится набор пассажей
+   (`AgentInfo.passage_texts`), близость —
    максимум по ним; сейчас это проза описания без примеров (см. «Оценка
    качества роутинга»). Решения:
    `no_match` (ниже низкого порога — запрос вне тематик всех агентов),
@@ -150,6 +157,7 @@ CFD — добавлены кейсы по численным методам, а
 venv/bin/python eval_routing.py              # эмбеддинг-слой + свип порога
 venv/bin/python eval_routing.py --llm        # полный каскад с LLM-роутером (нужна Ollama)
 venv/bin/python eval_routing.py --only epoz  # фильтр по id/тексту кейса
+venv/bin/python eval_routing.py --device cpu # устройство эмбеддера (по умолчанию CPU)
 ```
 
 По умолчанию скрипт оценивает только эмбеддинг-слой и его пороги, с `--llm`
@@ -392,7 +400,8 @@ DELETE /agents/{agent_id}/v1/platform/conversations/{conversation_id}
 | `POST` | `/agents/{agent_id}/ocr`      | `ocr`       | SSE (`token` + `[DONE]`)    |
 
 Не входит в OpenAI-контракт — единственная capability-ручка мастера,
-пережившая переход, специально для инструментов без диалога (сейчас — OCR).
+оставленная для инструментов без диалога (агент OCR выведен из контура;
+ручка сохранена как совместимый путь).
 
 `capabilities` агента используется в двух ролях, которые легко перепутать:
 - как источник для **capability-маршрутов выше** (`ocr` → `/agents/{id}/ocr`);
@@ -568,7 +577,7 @@ agents:
 | `PATCH` | `/admin/agents/{id}` | частичное обновление; `id` в теле запрещён |
 | `DELETE` | `/admin/agents/{id}` | `200`; снос `FALLBACK_AGENT` → `409` |
 | `POST` | `/admin/registry/reload` | перечитать `agents.yaml` с диска |
-| `GET` | `/admin/registry` | статус: путь к файлу, `version`, счётчики, состав индекса и кэша адаптеров |
+| `GET` | `/admin/registry` | статус: путь к файлу, `version`, счётчики, состав индекса и кэша адаптеров, `embedder_loaded` |
 
 `PATCH` использует `exclude_unset=True`: не переданные поля сохраняют текущие
 значения, а не затираются в `null`.
@@ -615,7 +624,7 @@ agents:
 агента правильный инструмент — `PATCH {"enabled": false}`.
 
 > На текущем этапе реально запущены **ЕПоЗ**, **slave_chat** (`id: "chat"`),
-> **document_chat**, **tech_rag** и **OCR**. Агентам, чьи сервисы не подняты,
+> **document_chat**, **tech_rag**. Агентам, чьи сервисы не подняты,
 > имеет смысл выставить `enabled: false`, — иначе роутер может выбрать
 > агента без рабочего `url`.
 
@@ -623,7 +632,8 @@ agents:
 
 `config.py` (pydantic-settings) собирает платформенные дефолты: `HOST`/`PORT`,
 лимиты исходящих соединений к агентам (важны под много параллельных SSE),
-`FALLBACK_AGENT`, `AGENTS_FILE`, а также параметры аутентификации.
+`FALLBACK_AGENT`, `AGENTS_FILE`, а также параметры аутентификации —
+пользовательской (Keycloak) и внутренней (master → агент).
 Переопределяются через `.env`.
 
 `AGENTS_FILE` — путь к реестру, по умолчанию `agents.yaml`. Относительный путь
@@ -632,6 +642,26 @@ agents:
 бы разные файлы. Абсолютный путь пригодится, если реестр должен жить вне
 репозитория — например на volume, чтобы правки через API переживали
 пересборку образа.
+
+### Внутренняя аутентификация master → агент
+
+Master шлёт каждому агенту `X-Internal-Token` (per-agent секрет) и
+`X-Request-Id`. Токены задаются JSON-объектом `{agent_id: token}` в
+`AGENT_INTERNAL_TOKENS` или отдельным файлом `AGENT_INTERNAL_TOKENS_FILE`
+(значения файла важнее env). В `agents.yaml` их класть нельзя: реестр
+отдаётся через `GET /admin/agents` и правится на лету.
+
+- `ENV=prod` — fail-closed: если у включённого агента нет токена (или он
+  короче 32 символов), master не стартует;
+- `ENV=dev` — отсутствие токенов допустимо, заголовок просто не отправляется;
+- `LOG_LEVEL=INFO` включает access-лог с `request_id` и проверенным
+  `user_id`; сами токены в логи не попадают;
+- `X-Request-Id` возвращается клиенту в заголовке ответа (и открыт для
+  браузера через CORS `expose_headers`), чтобы фронт мог приложить его к
+  сообщению об ошибке.
+
+Подробности, генерация и ротация токенов —
+[docs/authentication.md](docs/authentication.md).
 
 ## Аутентификация и роли
 
@@ -708,10 +738,19 @@ ROUTING_CACHE_SIZE=256
 # --- реестр ---
 AGENTS_FILE=agents.yaml
 
+# --- внутренняя аутентификация master -> агент ---
+# dev: можно не задавать; prod: для каждого включённого агента нужен токен 32+ символа
+ENV=dev
+LOG_LEVEL=WARNING
+#AGENT_INTERNAL_TOKENS={"epoz":"<secret>","chat":"<secret>"}
+#AGENT_INTERNAL_TOKENS_FILE=/run/secrets/agent_internal_tokens.json
+
 # --- models ---
 OLLAMA_HOST=http://localhost:11434
 OLLAMA_MODEL=gemma2:2b
 EMBEDD_MODEL=intfloat/multilingual-e5-small
+# cpu | cuda | cuda:0 | mps (по умолчанию cpu)
+EMBEDD_DEVICE=cpu
 ```
 или
 ```
@@ -747,20 +786,36 @@ ROUTING_CACHE_SIZE=256
 # --- реестр ---
 AGENTS_FILE=agents.yaml
 
+# --- внутренняя аутентификация master -> агент ---
+# dev: можно не задавать; prod: для каждого включённого агента нужен токен 32+ символа
+ENV=dev
+LOG_LEVEL=WARNING
+#AGENT_INTERNAL_TOKENS={"epoz":"<secret>","chat":"<secret>"}
+#AGENT_INTERNAL_TOKENS_FILE=/run/secrets/agent_internal_tokens.json
+
 # --- models ---
 OLLAMA_HOST=http://localhost:11434
 OLLAMA_MODEL=qwen3.6:35b
 EMBEDD_MODEL=BAAI/bge-m3
+# cpu | cuda | cuda:0 | mps (по умолчанию cpu)
+EMBEDD_DEVICE=cpu
 ```
 ```bash
 # запуск
-python main.py
-# или
-uvicorn main:app --host 127.0.0.1 --port 8000 --reload
+python main.py        # reload только при ENV=dev
+
+# или, предпочтительно: reload-родитель uvicorn не импортирует приложение
+uvicorn main:app --host 127.0.0.1 --port 8000 --reload   # dev
+uvicorn main:app --host 127.0.0.1 --port 8000            # prod, без reload
 ```
 
 Мастер поднимается на `http://127.0.0.1:8000`. `timeout_keep_alive=300`
 и `timeout=300` у httpx-клиента — под долгие SSE-стримы.
+
+Модель эмбеддера грузится один раз на процесс и только при первом
+auto-роутинге: старт и `/v1/models` не занимают VRAM. При `--workers N`
+каждый воркер держит свою копию — для 16-гигабайтной карты с Ollama держите
+`EMBEDD_DEVICE=cpu` (см. `guides/embedder-double-load-fix.md`).
 
 ## Примеры запросов
 
