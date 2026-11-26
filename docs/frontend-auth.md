@@ -40,9 +40,7 @@ JWT по Authorization Code + PKCE и дальше ходит с ним в maste
 | API base URL | `http://<ПУБЛИЧНЫЙ_IP>:8005/api` |
 | Web redirect URI | `http://<ПУБЛИЧНЫЙ_IP>:8005/auth/callback` |
 | Web origin | `http://<ПУБЛИЧНЫЙ_IP>:8005` |
-| Mobile redirect URI (приложение 1) | `pro.tidi.tidi_assistant_flutter:/oauth2redirect` |
-| Mobile redirect URI (приложение 2) | `com.example.tidi_assistant_flutter:/oauth2redirect` |
-| Mobile redirect URI (приложение 3) | `ru.tidi.app:/oauth2redirect` |
+| Mobile redirect URI | `ru.tidi.assistant:/oauth2redirect` |
 
 Эти же redirect URI / web origin зарегистрированы в клиенте `master-node`
 (в `tidi-realm.json` через `${PUBLIC_IP}`). Frontend-разработчики ничего не
@@ -265,11 +263,8 @@ window.location.assign(
 ### 6.1. Общие правила
 
 - Только **Authorization Code + PKCE**, без client secret.
-- Redirect URI — кастомная схема. У нас **три** мобильные схемы (все
-  зарегистрированы в клиенте `master-node`):
-  `pro.tidi.tidi_assistant_flutter:/oauth2redirect`,
-  `com.example.tidi_assistant_flutter:/oauth2redirect` и
-  `ru.tidi.app:/oauth2redirect`.
+- Redirect URI — кастомная схема `ru.tidi.assistant:/oauth2redirect`
+  (зарегистрирована в клиенте `master-node`).
 - Токены — в **Keychain (iOS)** / **EncryptedSharedPreferences или Keystore
   (Android)**, не в обычных настройках.
 - Все запросы — по HTTPS.
@@ -287,18 +282,16 @@ window.location.assign(
 ### 6.3. Redirect URI
 
 В Keycloak (Clients → `master-node` → Settings → Valid redirect URIs)
-зарегистрированы **три** схемы:
+зарегистрирована одна схема:
 
 ```
-pro.tidi.tidi_assistant_flutter:/oauth2redirect
-com.example.tidi_assistant_flutter:/oauth2redirect
-ru.tidi.app:/oauth2redirect
+ru.tidi.assistant:/oauth2redirect
 ```
 
-Каждое приложение обязано использовать ровно свою схему. Не используйте `*`
-для мобильных схем. Если библиотека формирует схему с `//`
-(`pro.tidi.tidi_assistant_flutter://oauth2redirect`) — регистрируйте и
-используйте именно тот вариант с `//`.
+Приложение обязано использовать ровно эту строку. Не используйте `*` для
+мобильных схем. Если библиотека формирует схему с `//`
+(`ru.tidi.assistant://oauth2redirect`) — регистрируйте и используйте именно
+тот вариант с `//`.
 
 ### 6.4. Пример (Android, AppAuth)
 
@@ -312,7 +305,7 @@ val authRequest = AuthorizationRequest.Builder(
   serviceConfig,
   "master-node",
   ResponseTypeValues.CODE,
-  Uri.parse("pro.tidi.tidi_assistant_flutter:/oauth2redirect")
+  Uri.parse("ru.tidi.assistant:/oauth2redirect")
 ).setScope("openid profile email").build()
 ```
 
@@ -326,7 +319,7 @@ let request = OIDAuthorizationRequest(
   configuration: config,
   clientId: "master-node",
   scopes: ["openid", "profile", "email"],
-  redirectURL: URL(string: "pro.tidi.tidi_assistant_flutter:/oauth2redirect")!,
+  redirectURL: URL(string: "ru.tidi.assistant:/oauth2redirect")!,
   responseType: OIDResponseTypeCode,
   additionalParameters: nil
 )
