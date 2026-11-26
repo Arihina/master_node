@@ -1,17 +1,17 @@
-# Keycloak (Postgres + Keycloak, HTTP)
+# Keycloak (часть единого deploy)
 
-IdP для master-node. TLS пока не используется; контур работает по HTTP на
-белом IP через nginx. Сам Keycloak слушает `127.0.0.1:8081` с относительным
-путём `/auth`; наружу его отдаёт nginx на порту `8005` по пути `/auth/`.
-Когда появится домен/сертификат — nginx будет терминировать HTTPS, а
-`KC_HOSTNAME_STRICT` можно вернуть в `true`.
+IdP для master-node. Keycloak запускается **общим** `docker-compose.yml` из
+[deploy/](../README.md) вместе с Postgres и Qdrant — отдельного compose для
+Keycloak больше нет. Сам Keycloak слушает `127.0.0.1:8081` с относительным
+путём `/auth`; наружу его отдаёт nginx на порту `8005` по пути `/auth/`. TLS
+пока не используется.
 
 ## Запуск
 
 ```bash
-cd deploy/keycloak
+cd deploy
 cp .env.example .env
-# задайте KC_ADMIN_PASSWORD, KC_DB_PASSWORD и PUBLIC_IP (белый IP сервера)
+# задайте POSTGRES_PASSWORD, KC_ADMIN_PASSWORD и PUBLIC_IP (белый IP сервера)
 docker compose up -d
 ```
 
@@ -44,10 +44,8 @@ curl -sf http://127.0.0.1:8081/auth/realms/tidi/.well-known/openid-configuration
 - клиент `master-node` (public, Authorization Code + PKCE, `S256`);
 - audience-mapper, добавляющий `master-node` в `aud` access-токена;
 - realm-роли `platform-user` и `platform-admin`;
-- redirect URIs для web (`http://${PUBLIC_IP}:8005/auth/callback`) и трёх
-  мобильных схем (`pro.tidi.tidi_assistant_flutter:/oauth2redirect`,
-  `com.example.tidi_assistant_flutter:/oauth2redirect`,
-  `ru.tidi.app:/oauth2redirect`), web origin `http://${PUBLIC_IP}:8005`.
+- redirect URIs для web (`http://${PUBLIC_IP}:8005/auth/callback`) и mobile
+  (`ru.tidi.assistant:/oauth2redirect`), web origin `http://${PUBLIC_IP}:8005`.
   `${PUBLIC_IP}` подставляется из env контейнера при импорте (значение из
   `.env`).
 
@@ -112,13 +110,14 @@ Keycloak (`http://<PUBLIC_IP>:8005/auth/realms/tidi`). JWKS master может т
 ## Остановка и данные
 
 ```bash
-docker compose down          # контейнеры, данные сохраняются в volume pgdata
+cd deploy
+docker compose down          # контейнеры останавливаются, данные сохраняются
 docker compose down -v       # полное удаление БД (и импортированного realm)
 ```
 
-Бэкап: штатный `pg_dump` из контейнера postgres или `docker compose exec
-postgres pg_dump -U keycloak keycloak > keycloak.sql`. Realm можно
-дополнительно экспортировать через `kc.sh export` (см. docs Keycloak).
+Бэкап: штатный `pg_dump` из общего postgres или
+`docker compose exec postgres pg_dump -U postgres keycloak > keycloak.sql`.
+Realm можно дополнительно экспортировать через `kc.sh export`.
 
 ## Связанные документы
 

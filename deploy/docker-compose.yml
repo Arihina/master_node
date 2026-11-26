@@ -1,0 +1,81 @@
+# Единая инфраструктура платформы: Postgres + Qdrant + Keycloak.
+#
+# Все сервисы слушают ТОЛЬКО loopback (127.0.0.1); наружу ходит только nginx.
+# Один общий Postgres на 5433, внутри init-db.sh создаёт базы агентов + keycloak.
+#
+# Быстрый старт:
+#   cp .env.example .env   # задайте пароли и PUBLIC_IP
+#   docker compose up -d
+#   docker compose ps
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init-db.sh:/docker-entrypoint-initdb.d/init-db.sh:ro
+    ports:
+      - "127.0.0.1:5433:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  qdrant:
+    image: qdrant/qdrant:v1.19.1
+    container_name: qdrant
+    restart: unless-stopped
+    volumes:
+      - qdrant_data:/qdrant/storage
+    ports:
+      - "127.0.0.1:6336:6333"
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.2
+    container_name: keycloak
+    restart: unless-stopped
+    command: ["start", "--import-realm"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      # --- начальный админ (только первая инициализация) ---
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${KC_ADMIN_USERNAME:?set KC_ADMIN_USERNAME in .env}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KC_ADMIN_PASSWORD:?set KC_ADMIN_PASSWORD in .env}
+
+      # --- общий Postgres (база keycloak создаётся init-db.sh) ---
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://postgres:5432/keycloak
+      KC_DB_USERNAME: ${POSTGRES_USER:-postgres}
+      KC_DB_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+
+      # --- HTTP без TLS; issuer строится из X-Forwarded-* (nginx) ---
+      KC_HTTP_ENABLED: "true"
+      KC_HTTP_PORT: 8080
+      KC_HOSTNAME_STRICT: "false"
+      KC_HOSTNAME_STRICT_HTTPS: "false"
+      # nginx отдаёт Keycloak по пути /auth/ на внешнем порту
+      KC_HTTP_RELATIVE_PATH: /auth
+      KC_PROXY_HEADERS: xforwarded
+
+      # подстановка ${PUBLIC_IP} в redirect URIs / web origins при импорте realm
+      PUBLIC_IP: ${PUBLIC_IP:?set PUBLIC_IP in .env}
+
+      # --- операции ---
+      KC_HEALTH_ENABLED: "true"
+      KC_METRICS_ENABLED: "true"
+      KC_LOG_LEVEL: INFO
+    ports:
+      - "127.0.0.1:8081:8080"
+    volumes:
+      - ./keycloak/tidi-realm.json:/opt/keycloak/data/import/tidi-realm.json:ro
+
+volumes:
+  postgres_data:
+  qdrant_data:

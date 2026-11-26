@@ -26,13 +26,13 @@
       "redirectUris": [
         "http://localhost:3000/*",
         "http://127.0.0.1:3000/*",
-        "http://127.0.0.1:8005/auth/callback",
-        "ru.tidi.app:/oauth2redirect"
+        "http://${PUBLIC_IP}:8005/auth/callback",
+        "ru.tidi.assistant:/oauth2redirect"
       ],
       "webOrigins": [
         "http://localhost:3000",
         "http://127.0.0.1:3000",
-        "http://127.0.0.1:8005"
+        "http://${PUBLIC_IP}:8005"
       ],
       "attributes": {
         "pkce.code.challenge.method": "S256",
